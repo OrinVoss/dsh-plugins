@@ -1,0 +1,16 @@
+# dsh-memory —— 组合包（bundle）自己的 patch 层。
+#
+# 作为 profile 依赖安装后，profile 的 `dsh.profile.bundles` 里列出本包，
+# 这一行由本文件声明；profile 自己的 cordis.patch.yml 不再 insert，
+# 否则同一 id 会被插入两次（`applyEntryPatches` 只是 push，会加载两遍、
+# 第二次注册同名工具会报 already registered）。
+#
+# 用户仍可在 profile patch 里按 `id: memory` 覆盖这里的 config 或 `disabled: true`。
+- insert:
+    - id: memory
+      name: dsh-memory
+      config:
+        maxBlockBytes: 20480
+        autoAgentsSync: true
+        settingsPage: true
+        syncOnStartup: true

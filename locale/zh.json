@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "记忆",
+    "description": "长期记忆库：跨会话的 Markdown 记忆 + 四个 memory_* 工具，全局索引自动注入 AGENTS.md；设置 → 记忆 可浏览与编辑。"
+  }
+}
