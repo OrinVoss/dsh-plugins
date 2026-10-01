@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Memory",
+    "description": "Long-term memory: cross-session Markdown memories plus four memory_* tools; the global index is injected into AGENTS.md and browseable under Settings → Memory."
+  }
+}
