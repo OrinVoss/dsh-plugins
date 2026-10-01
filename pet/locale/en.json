@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Desktop Pet",
+    "description": "A small companion living in the frame overlay: five pets to choose from (cat, shiba, koi, slime, robot), recoloured by the active skin and reacting to the agent (working, waiting for approval, erroring, finishing). Click to pat it, double-click to switch pets, drag it anywhere; size is adjustable from 28 to 200 px."
+  }
+}

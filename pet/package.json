@@ -1,0 +1,38 @@
+{
+  "name": "dsh-pet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "桌面宠物：一只住在浮层里的小家伙，跟着皮肤换色、跟着 Agent 干活/等待/报错/收工换表情，含 6 种宠物与一条通用设置行。",
+  "icon": "./icon.svg",
+  "main": "host.js",
+  "type": "commonjs",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "files": [
+    "host.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "selfcheck.cjs",
+    "test/hosttest.cjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node selfcheck.cjs && node test/hosttest.cjs"
+  }
+}

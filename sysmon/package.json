@@ -1,0 +1,28 @@
+{
+  "name": "dsh-sysmon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "System monitor: CPU / memory / disk IO / dual-GPU usage panel.",
+  "icon": "./icon.svg",
+  "main": "host.js",
+  "type": "commonjs",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "files": [
+    "host.js",
+    "client.js",
+    "icon.svg",
+    "locale/*.json",
+    "README.md"
+  ]
+}

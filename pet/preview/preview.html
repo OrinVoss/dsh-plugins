@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-pet 预览</title>
+<style>
+  /* 预览页自带的"设计系统替身"：真实运行时装在 DSH 里，这些 token 由外壳提供 */
+  :root{
+    --dsw-alias-label-primary:#2b2b2b; --dsw-alias-label-secondary:#5a5a5a; --dsw-alias-label-tertiary:#8a8a8a;
+    --dsw-alias-label-caption:#9a9a9a; --dsw-alias-label-dimmed:#b8b8b8;
+    --dsw-alias-bg-layer-2:#ffffff; --dsw-alias-bg-module-platform:#efe7d8;
+    --dsw-alias-border-l2:rgba(0,0,0,.1); --dsw-alias-border-l3:rgba(0,0,0,.15); --dsw-alias-border-l4:rgba(0,0,0,.22);
+    --dsw-alias-interactive-bg-hover:rgba(0,0,0,.05);
+    --dsw-alias-state-business-primary:#4176e6; --dsw-static-neutral-bluish-400:#7f9bd6;
+    --dsw-radius-md:8px; --dsw-radius-xl:14px;
+    --dsw-skin-accent:#B4553F;
+  }
+  body{margin:0;background:#f6f1e6;color:#2b2b2b;font-family:"Microsoft YaHei",system-ui,sans-serif}
+  h2{font-size:15px;font-weight:500;margin:22px 24px 8px}
+  .grid{display:grid;grid-template-columns:120px repeat(6,88px);gap:8px;padding:0 24px;align-items:center}
+  .head{font-size:12px;color:#8a8a8a;text-align:center}
+  .name{font-size:13px}
+  .cell{position:relative;width:88px;height:96px;display:flex;align-items:flex-end;justify-content:center;
+        border:.5px solid rgba(0,0,0,.08);border-radius:10px;background:rgba(255,255,255,.5);overflow:hidden}
+  /* 预览里所有格子都复用 #dsh-pet-root 这个 id 让状态样式生效，
+     但真实运行时它是 position:fixed（贴屏幕角落），这里必须按住它 */
+  .cell#dsh-pet-root{position:relative;inset:auto;z-index:1;pointer-events:auto}
+  .dark{background:#17171a;color:#e8e8e8}
+  .dark .cell{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08)}
+  .row-preview{padding:0 24px 30px;max-width:900px}
+  /* 静态截图没法悬停：浅色那行的步进胶囊强制显示箭头，深色那行保留真实的静止态 */
+  #row-light .dsh-pet-arrows{opacity:1}
+  #sizes{display:flex;align-items:flex-end;gap:18px;padding:0 24px 22px;min-height:190px}
+  #duo{display:flex;align-items:flex-end;gap:40px;padding:4px 24px 18px;min-height:180px}
+  #trail{padding:0 24px 22px}
+  .trailbox{position:relative;width:520px;height:220px;border:.5px solid rgba(0,0,0,.08);border-radius:12px;background:rgba(255,255,255,.55);overflow:hidden}
+  .trailbox > svg.trail-line{position:absolute;inset:0}
+  .ghost{position:absolute;transform:translate(-50%,-50%)}
+  .ghost svg{display:block;position:static}
+  .sizebox{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px}
+  .bubblerow{display:flex;gap:70px;padding:10px 24px 26px;min-height:200px;align-items:flex-end}
+  .bcell{position:relative;width:170px;height:180px;display:flex;align-items:center;justify-content:center;border:.5px solid rgba(0,0,0,.08);border-radius:12px;background:rgba(255,255,255,.5)}
+  .bcell#dsh-pet-root{position:relative;inset:auto;z-index:1;pointer-events:auto}
+  .darkrow .dsh-pet-group{border-color:rgba(255,255,255,.12)}
+  .darkrow .dsh-pet-title,.darkrow .dsh-pet-cube,.darkrow .dsh-pet-toggle,.darkrow .dsh-pet-segbtn{color:#e8e8e8}
+  .darkrow{--dsw-alias-label-primary:#e8e8e8;--dsw-alias-label-secondary:#b8b8b8;--dsw-alias-label-tertiary:#8a8a8a;
+           --dsw-alias-label-caption:#7a7a7a;--dsw-alias-border-l2:rgba(255,255,255,.12);--dsw-alias-border-l4:rgba(255,255,255,.2);
+           --dsw-alias-interactive-bg-hover:rgba(255,255,255,.07);--dsw-alias-bg-module-platform:#2a2a33;background:#1b1b20;padding-bottom:24px}
+</style>
+</head>
+<body>
+<h2>5 只宠物 × 6 种状态（浅色底，① 跟随皮肤关闭）</h2>
+<div class="grid" id="grid"></div>
+<h2 class="dark" style="color:#e8e8e8;background:#17171a;margin:22px 0 0;padding:18px 24px 0">深色主题 + 跟随皮肤（强调色 = 朱砂 #B4553F）：锦鲤 / 小机器人</h2>
+<div class="grid dark" id="grid-dark" style="padding-bottom:20px"></div>
+<h2>猫 vs 柴犬：同一个四足骨架，靠耳朵 / 口鼻 / 卷尾 / 项圈区分</h2>
+<div id="duo"></div>
+<h2>大小随便调：同一只猫的四个快捷键（滑块 28–200px 之间任意值）</h2>
+<div id="sizes"></div>
+<h2>运动：锦鲤的滑行轨迹（同一只鱼在 6 秒内的位置取样，真实运行时是连续游动并按方向翻面）</h2>
+<div id="trail"></div>
+<h2>对话框：带小尾巴，宠物贴顶时自动翻到下方（气泡里是中文动作词，不是 read_image）</h2>
+<div class="bubblerow" id="bubbles"></div>
+<h2>设置 → 通用 里的那一行（浅色 / 深色）</h2>
+<div class="row-preview"><div id="row-light"></div></div>
+<div class="darkrow"><div class="row-preview" style="padding-top:16px"><div id="row-dark"></div></div></div>
+
+<script>
+  window.__ModuleLoader__ = { load(definition) { window.__petDefinition = definition } }
+</script>
+<script src="../client.js"></script>
+<script>
+  const mod = window.__petDefinition.factory(function (name) {
+    if (name === 'react') {
+      return {
+        createElement: function (type, props) { return { type: type, props: props || {}, children: Array.prototype.slice.call(arguments, 2) } },
+        useState: function (value) { return [value, function () {}] },
+        useEffect: function () {},
+        useRef: function (value) { return { current: value } }
+      }
+    }
+    throw new Error('unexpected require: ' + name)
+  })
+  const I = mod.petInternals
+  const STATES = [['idle', '空闲'], ['work', '干活'], ['wait', '等你点头'], ['done', '收工'], ['error', '报错'], ['sleep', '打盹']]
+
+  // 给每只宠物造一份"该状态下"的活动快照，只为算气泡文案
+  function sampleFor(state) {
+    const now = Date.now()
+    const base = { startedAt: now - 200000, tokens: 128000, turns: 4, toolCalls: 11, lastTool: { name: 'read', at: now - 1000 } }
+    if (state === 'work') return Object.assign(base, { running: true, activeTools: 1 })
+    if (state === 'wait') return Object.assign(base, { awaitingApproval: true })
+    if (state === 'done') return Object.assign(base, { lastTurnEndAt: now - 500 })
+    if (state === 'error') return Object.assign(base, { lastError: { message: '出错了', at: now - 500 } })
+    if (state === 'sleep') return Object.assign(base, { lastTurnEndAt: now - 200000 })
+    return base
+  }
+
+  function cell(pet, state, accent) {
+    const wrap = document.createElement('div')
+    wrap.className = 'cell'
+    wrap.id = 'dsh-pet-root'          // 预览里故意复用同一个 id：CSS 按 id 匹配状态
+    wrap.dataset.state = state
+    wrap.dataset.quiet = 'false'
+    wrap.dataset.hidden = 'false'
+    wrap.dataset.badge = 'off'
+
+    const outer = document.createElement('div')
+    outer.className = 'dsh-pet-wrap'
+    const bubble = document.createElement('div')
+    bubble.className = 'pet-bubble'
+    const text = I.bubbleText(state, sampleFor(state), Date.now())
+    bubble.textContent = text
+    wrap.dataset.bubble = text === '' ? 'off' : 'on'
+    const art = document.createElement('div')
+    art.className = 'pet-art'
+    art.innerHTML = I.renderPet(pet, { accent: accent })
+    const svg = art.firstChild
+    svg.setAttribute('width', '60')
+    svg.setAttribute('height', '57')
+    outer.appendChild(bubble)
+    outer.appendChild(art)
+    wrap.appendChild(outer)
+    return wrap
+  }
+
+  function buildGrid(host, accent) {
+    const head = document.createElement('div')
+    head.className = 'head'
+    head.textContent = '宠物 \\ 状态'
+    host.appendChild(head)
+    for (const pair of STATES) {
+      const cellHead = document.createElement('div')
+      cellHead.className = 'head'
+      cellHead.textContent = pair[1]
+      host.appendChild(cellHead)
+    }
+    for (const pet of (accent === null ? I.PETS : I.PETS.filter((item) => item.link === true))) {
+      const name = document.createElement('div')
+      name.className = 'name'
+      name.textContent = pet.name + (pet.link === true ? ' ⭑' : '')
+      host.appendChild(name)
+      for (const pair of STATES) host.appendChild(cell(pet, pair[0], accent))
+    }
+  }
+
+  buildGrid(document.getElementById('grid'), null)
+  buildGrid(document.getElementById('grid-dark'), '#B4553F')
+
+  // 猫 vs 柴犬：并排放大，专治"两只长得一样"
+  const duoHost = document.getElementById('duo')
+  for (const petId of ['cat', 'shiba']) {
+    const pet = I.PETS.find((item) => item.id === petId)
+    const box = document.createElement('div')
+    box.className = 'sizebox'
+    const art = document.createElement('div')
+    art.className = 'pet-art'
+    art.innerHTML = I.renderPet(pet, {})
+    const svg = art.firstChild
+    svg.setAttribute('width', '132')
+    svg.setAttribute('height', '126')
+    const cap = document.createElement('div')
+    cap.className = 'head'
+    cap.textContent = pet.name
+    box.appendChild(art)
+    box.appendChild(cap)
+    duoHost.appendChild(box)
+  }
+
+  // 尺寸演示：同一只猫按四个快捷键放大
+  const sizeHost = document.getElementById('sizes')
+  for (const preset of I.SIZE_PRESETS) {
+    const box = document.createElement('div')
+    box.className = 'sizebox'
+    const art = document.createElement('div')
+    art.className = 'pet-art'
+    art.innerHTML = I.renderPet(I.PETS[0], {})
+    const svg = art.firstChild
+    svg.setAttribute('width', preset.px)
+    svg.setAttribute('height', Math.round((preset.px * 42) / 44))
+    const cap = document.createElement('div')
+    cap.className = 'head'
+    cap.textContent = preset.name + ' · ' + preset.px + 'px'
+    box.appendChild(art)
+    box.appendChild(cap)
+    sizeHost.appendChild(box)
+  }
+
+  // 运动轨迹取样：直接用真实算法（glideOffset）画线并把鱼摆到各时刻的位置
+  const trailHost = document.getElementById('trail')
+  const trailBox = document.createElement('div')
+  trailBox.className = 'trailbox'
+  const profile = I.RIG_MOTION.fish
+  const bounds = { minDx: -180, maxDx: 180, minDy: -52, maxDy: 52 }
+  const cx = 260
+  const cy = 110
+  const ns = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(ns, 'svg')
+  svg.setAttribute('class', 'trail-line')
+  svg.setAttribute('width', '520')
+  svg.setAttribute('height', '220')
+  const path = document.createElementNS(ns, 'path')
+  let d = ''
+  for (let t = 0; t <= 30.0001; t += 0.05) {
+    const offset = I.glideOffset(profile, bounds, t)
+    d += (d === '' ? 'M' : 'L') + (cx + offset.dx).toFixed(1) + ' ' + (cy + offset.dy).toFixed(1)
+  }
+  path.setAttribute('d', d)
+  path.setAttribute('fill', 'none')
+  path.setAttribute('stroke', '#C9B79A')
+  path.setAttribute('stroke-width', '1.4')
+  path.setAttribute('stroke-dasharray', '4 5')
+  svg.appendChild(path)
+  trailBox.appendChild(svg)
+  const koi = I.PETS.find((pet) => pet.id === 'koi')
+  for (let i = 0; i < 6; i++) {
+    const t = i * 4.2
+    const offset = I.glideOffset(profile, bounds, t)
+    const ghost = document.createElement('div')
+    ghost.className = 'ghost'
+    ghost.style.left = (cx + offset.dx).toFixed(1) + 'px'
+    ghost.style.top = (cy + offset.dy).toFixed(1) + 'px'
+    ghost.style.opacity = String(0.32 + i * 0.14)
+    ghost.innerHTML = I.renderPet(koi, {})
+    const art = ghost.firstChild
+    art.setAttribute('width', '56')
+    art.setAttribute('height', '53')
+    if (offset.vx < 0) ghost.style.transform = 'translate(-50%,-50%) scaleX(-1)'
+    trailBox.appendChild(ghost)
+  }
+  trailHost.appendChild(trailBox)
+
+  // 对话框演示：尾巴朝下 / 贴顶时翻成朝上
+  const bubbleHost = document.getElementById('bubbles')
+  for (const demo of [{ side: 'above', text: '看图…' }, { side: 'below', text: '敲命令…' }, { side: 'above', text: '等你点头' }]) {
+    const box = document.createElement('div')
+    box.className = 'bcell'
+    box.id = 'dsh-pet-root'
+    box.dataset.state = 'idle'
+    box.dataset.quiet = 'false'
+    box.dataset.hidden = 'false'
+    box.dataset.badge = 'off'
+    box.dataset.side = demo.side
+    box.dataset.bubble = 'on'
+    const wrap = document.createElement('div')
+    wrap.className = 'dsh-pet-wrap'
+    const bubble = document.createElement('div')
+    bubble.className = 'pet-bubble'
+    bubble.textContent = demo.text
+    const art = document.createElement('div')
+    art.className = 'pet-art'
+    art.innerHTML = I.renderPet(I.PETS[0], {})
+    const svg = art.firstChild
+    svg.setAttribute('width', '76')
+    svg.setAttribute('height', '73')
+    wrap.appendChild(bubble)
+    wrap.appendChild(art)
+    box.appendChild(wrap)
+    bubbleHost.appendChild(box)
+  }
+
+  // 迷你 react → HTML 渲染器：只为把设置行画出来看
+  function renderToHtml(node) {
+    if (node === null || node === undefined || node === false) return ''
+    if (typeof node === 'string' || typeof node === 'number') return String(node)
+    if (Array.isArray(node)) return node.map(renderToHtml).join('')
+    if (typeof node.type === 'function') return renderToHtml(node.type(node.props)) // 函数组件：直接调用
+    const props = node.props || {}
+    const attrs = []
+    for (const key of Object.keys(props)) {
+      if (key === 'children' || key === 'dangerouslySetInnerHTML' || key === 'key' || typeof props[key] === 'function') continue
+      const name = key === 'className' ? 'class' : key === 'htmlFor' ? 'for' : key
+      if (key === 'style' && props[key] && typeof props[key] === 'object') {
+        attrs.push('style="' + Object.keys(props[key]).map((k) => k + ':' + props[key][k]).join(';') + '"')
+      } else if (props[key] !== false && props[key] !== null && props[key] !== undefined) {
+        attrs.push(name + '="' + String(props[key]).replace(/"/g, '&quot;') + '"')
+      }
+    }
+    const inner = props.dangerouslySetInnerHTML ? props.dangerouslySetInnerHTML.__html : (node.children || []).map(renderToHtml).join('')
+    return '<' + node.type + (attrs.length ? ' ' + attrs.join(' ') : '') + '>' + inner + '</' + node.type + '>'
+  }
+
+  document.getElementById('row-light').innerHTML = renderToHtml(I.PetRow())
+  document.getElementById('row-dark').innerHTML = renderToHtml(I.PetRow())
+
+  // 把样式表插进来（client.js 的 installStyleSheet 需要 document.head，这里直接注入）
+  const style = document.createElement('style')
+  style.textContent = I.CSS
+  document.head.appendChild(style)
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="7" y="21" width="5.5" height="8.6" rx="2.75" fill="url(#tokenstats)" />
+  <rect x="15.25" y="15" width="5.5" height="14.6" rx="2.75" fill="url(#tokenstats)" />
+  <rect x="23.5" y="8.4" width="5.5" height="21.2" rx="2.75" fill="url(#tokenstats)" />
+  <defs>
+    <linearGradient id="tokenstats" x1="18" y1="8.4" x2="18" y2="29.6" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4A65E8" />
+      <stop offset="1" stop-color="#6FCF7F" />
+    </linearGradient>
+  </defs>
+</svg>

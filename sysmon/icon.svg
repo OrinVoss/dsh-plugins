@@ -1,0 +1,22 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="9" y="4" width="3" height="4" rx="1.2" fill="#658EFF" />
+  <rect x="16.5" y="4" width="3" height="4" rx="1.2" fill="#658EFF" />
+  <rect x="24" y="4" width="3" height="4" rx="1.2" fill="#658EFF" />
+  <rect x="9" y="28" width="3" height="4" rx="1.2" fill="#658EFF" />
+  <rect x="16.5" y="28" width="3" height="4" rx="1.2" fill="#658EFF" />
+  <rect x="24" y="28" width="3" height="4" rx="1.2" fill="#658EFF" />
+  <rect x="4" y="9" width="4" height="3" rx="1.2" fill="#58BCC8" />
+  <rect x="4" y="16.5" width="4" height="3" rx="1.2" fill="#58BCC8" />
+  <rect x="4" y="24" width="4" height="3" rx="1.2" fill="#58BCC8" />
+  <rect x="28" y="9" width="4" height="3" rx="1.2" fill="#58BCC8" />
+  <rect x="28" y="16.5" width="4" height="3" rx="1.2" fill="#58BCC8" />
+  <rect x="28" y="24" width="4" height="3" rx="1.2" fill="#58BCC8" />
+  <rect x="9" y="9" width="18" height="18" rx="5" fill="url(#sysmon)" fill-opacity="0.92" />
+  <path d="M12 18.5H15L17.2 13.5L20 23.5L22.1 18.5H24" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  <defs>
+    <linearGradient id="sysmon" x1="18" y1="9" x2="18" y2="27" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#52CED8" />
+      <stop offset="1" stop-color="#617BEB" />
+    </linearGradient>
+  </defs>
+</svg>

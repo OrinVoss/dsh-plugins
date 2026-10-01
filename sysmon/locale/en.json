@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "System Status",
+    "description": "Live panel for CPU, memory, disk IO and dual-GPU utilisation."
+  }
+}

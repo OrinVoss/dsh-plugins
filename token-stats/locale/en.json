@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Token Usage Report",
+    "description": "Aggregates usage from local DSH session logs by day and by model: heatmap, daily trend chart and per-model ring chart."
+  }
+}
