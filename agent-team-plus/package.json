@@ -1,0 +1,32 @@
+{
+  "name": "@local/dsh-agent-team-plus",
+  "version": "0.2.0-rc.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Agent Teams 本地 fork：上限 16、新增 release_teammate（成员散伙腾坑、可再雇新）。域服务 + 工具层基于上游 0.2.0-rc.2。",
+  "main": "./lib/index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./tools": "./lib/tools.js",
+    "./invariant": "./lib/invariant.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node test/setup.mjs && node test/run.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.4",
+    "zod": "^4.4.3"
+  }
+}

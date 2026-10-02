@@ -1,0 +1,30 @@
+# dsh-agent-team-plus —— 本地 fork 组合包的 patch 层。
+#
+# 官方 @deepseek-ai/dsh-experimental-agent-team-profile 继续启用（它负责禁用旧的
+# 全局 subagent 工具、挂 Web 看板行 ui-agent-team）；本层按 bundles 列表顺序在其
+# 之后应用：关掉官方的两个运行时行，换成本地 fork（上限 16、新增 release_teammate）。
+#
+# 回退开关：关掉本组合包 → 官方两行原样恢复（8 上限、无散伙功能）；
+# 反过来官方包被跳过（如 DSH 升级后 peer 不匹配）时本层的 disable 找不到目标
+# 只会告警跳过，insert 照常生效——两边各自独立可回退。
+#
+# 用户仍可在 profile 的 cordis.patch.yml 里按 id（agent-team-plus /
+# tool-agent-team-plus）覆盖 config 或写 disabled: true。
+- id: agent-team
+  disabled: true
+- id: tool-agent-team
+  disabled: true
+- insert:
+    - id: agent-team-plus
+      name: '@local/dsh-agent-team-plus'
+      config:
+        maxMembers: 16
+        maxTasks: 256
+        maxPendingMessagesPerMember: 64
+        maxMessageBytes: 65536
+        disposalTimeoutMs: 5000
+    - id: tool-agent-team-plus
+      name: '@local/dsh-agent-team-plus/tools'
+      config:
+        freshProvider: spawn
+        forkProvider: fork
