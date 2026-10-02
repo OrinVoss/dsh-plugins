@@ -82,6 +82,19 @@ release_teammate({ target: "<成员名>" })   // 仅 Lead 可调用
    （patch 层按 bundles 顺序应用；我们的 `disabled: true` 必须晚于官方 `insert` 才能命中那两行）；
 3. `profiles/desktop/node_modules/@local/` 下建同名符号链接指向 1 中的目录。
 
+> ⚠️ **不要把官方那条组合包单独关掉**（插件页里的「智能体团队」）。它不只是那两行运行时逻辑：
+> ① 它 insert 的 `ui-agent-team` 才是 Web 名册/共享任务看板；② 它禁用了 4 条旧的全局 subagent
+> 工具行（`tool-subagent` / `tool-subagent-control` / `tool-subagent-list-agents` /
+> `tool-subagent-fork`，定义在 `dsh-base` 里）。单独关掉它 → 看板/名册整个消失，旧 subagent 工具
+> 又会和团队工具同时在场。
+> **要停用本 fork，请关掉「智能体团队 Plus」（本包）那一开关**，官方两行会自动恢复。
+
+为什么是「官方外壳 + 我们覆盖」，而不是直接改官方那一行？因为补丁方言**不允许改一行的 `name`/`id`**
+（`cordis-plugin-include` 的 `applyEntryPatches`：`name` 是断言字段，与目标不符就 `name mismatch … skipping`；
+只有除 `id`/`insert`/`name` 以外的字段才 `target[key] = value`）。所以**换实现只有"禁用原行 + 插入新行"
+这一条合法路径**。再加上：官方代码在只读的 `app.asar` 里（直接改会被桌面端自动更新整包覆盖、不在任何
+git 里、无法回退），以及「我们被版本判定跳过时要有官方兜底」这个需求——三者叠加就是现在这个形状。
+
 模块解析靠 DSH 的拦截层：本包 import 的 `@deepseek-ai/*` 与 `zod` 都写在
 `peerDependencies` 里，`routeLinked` 才会把它们重定向到 app.asar 里的**同一份**安装副本
 （对象身份一致，Cordis `Service` 基类不会出现两份）。
@@ -95,8 +108,8 @@ release_teammate({ target: "<成员名>" })   // 仅 Lead 可调用
 
 ## 4. 安装 / 回退
 
-- **回退**：把 `@local/dsh-agent-team-plus` 从 `dsh.profile.bundles` 里删掉（或写
-  `disabled: true`）即可回到官方行为，不需要动官方包。
+- **回退**：把 `@local/dsh-agent-team-plus` 从 `dsh.profile.bundles` 里删掉，或在插件页把
+  「智能体团队 Plus」关掉，即可回到官方行为——**不要反过去关官方那条**（原因见上一节的 ⚠️）。
 - **临时关掉失败成员**：`release_teammate` 对 `failed` 成员同样有效——这正是官方行为里
   「失败成员会一直占着名额」的解法。
 
