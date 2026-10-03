@@ -372,6 +372,42 @@ test('切换时间范围时模型颜色保持不变（回归）', () => {
   assert.strictEqual(sevenView.models[0].model, 'late', '范围内按用量排序应把 late 排第一')
 })
 
+test('圆环外沿留在 viewBox 以内，不会被裁成平口（回归）', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
+  const body = extractFunction(src, 'donutRing')
+  assert.ok(body !== null, '找不到 donutRing')
+  const donutRing = new Function('return (' + body + ')')()
+
+  const num = (name) => {
+    const m = new RegExp('const ' + name + ' = (\\d+)').exec(src)
+    assert.ok(m !== null, '找不到常量 ' + name)
+    return Number(m[1])
+  }
+
+  // 用 client.js 里的真实常量算一遍：外沿（半径 + 最大描边的一半）必须在方框内
+  const S = num('DONUT_SIZE')
+  const K = num('DONUT_STROKE')
+  const G = num('DONUT_HOVER_GROW')
+  const real = donutRing(S, K, G)
+  const outer = real.radius + real.hoverStroke / 2
+  assert.ok(outer < S / 2, `外沿 ${outer} 已触及/超出边界 ${S / 2}，会被裁成平口`)
+  assert.ok(S / 2 - outer >= 1, `外沿余量 ${S / 2 - outer}px 太小，抗锯齿仍会被切`)
+
+  // 记录这个回归本身：旧公式 (size - stroke) / 2 让外沿正好相切
+  assert.strictEqual((220 - 32) / 2 + 32 / 2, 220 / 2, '旧公式应当正好相切（这正是当初被裁的原因）')
+  assert.ok(real.radius + real.hoverStroke / 2 < 220 / 2 - 1, '新半径应明显小于相切值')
+
+  // 公式要对任意尺寸都成立（不只是 220）
+  for (const [size, stroke, grow] of [[120, 32, 5], [240, 16, 0], [220, 40, 8]]) {
+    const ring = donutRing(size, stroke, grow)
+    assert.ok(ring.radius > 0, `size=${size} 时半径算成了负值`)
+    assert.ok(
+      ring.radius + ring.hoverStroke / 2 < size / 2,
+      `size=${size} stroke=${stroke} grow=${grow} 时外沿越界`
+    )
+  }
+})
+
 test('client.js 引用的每个 dshts-* 类名都有对应样式', () => {
   const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
   // 定义：CSS 字符串里的 `.dshts-x{` / `.dshts-x,` / `.dshts-x:`

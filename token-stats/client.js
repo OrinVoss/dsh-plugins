@@ -608,13 +608,31 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------ 模型用量
 
+    const DONUT_SIZE = 220
+    const DONUT_STROKE = 32
+    const DONUT_HOVER_GROW = 5
+
+    /**
+     * 圆环几何。**外沿必须留在 viewBox 以内**：`r + 描边/2 < size/2`，
+     * 否则圆环会被正方形 viewBox 裁成平口（外沿正好相切时，裁掉 1px 就会切出
+     * 一段几像素高的竖直平口；悬浮加粗后更明显）。这里按「悬浮时的最大描边」
+     * 再留 3px 余量算半径。
+     */
+    function donutRing(size, stroke, grow) {
+      const hoverStroke = stroke + grow
+      const radius = size / 2 - (hoverStroke / 2 + 3)
+      return { radius, hoverStroke, circumference: 2 * Math.PI * radius }
+    }
+
     function Donut(props) {
       const models = props.models
       const total = props.total
-      const size = 220
-      const stroke = 32
-      const r = (size - stroke) / 2
-      const circumference = 2 * Math.PI * r
+      const size = DONUT_SIZE
+      const stroke = DONUT_STROKE
+      const ring = donutRing(size, stroke, DONUT_HOVER_GROW)
+      const hoverStroke = ring.hoverStroke
+      const r = ring.radius
+      const circumference = ring.circumference
       const [wrapRef, width] = useWidth()
       const [hover, setHover] = useState(-1)
       const boxSize = Math.max(120, Math.min(size, width || size))
@@ -646,7 +664,7 @@ window.__ModuleLoader__.load({
               r,
               fill: 'none',
               stroke: a.color,
-              strokeWidth: hover === a.index ? stroke + 5 : stroke,
+              strokeWidth: hover === a.index ? hoverStroke : stroke,
               strokeDasharray: a.dash,
               strokeDashoffset: a.offset,
               style: { transition: 'stroke-width .12s ease' },
