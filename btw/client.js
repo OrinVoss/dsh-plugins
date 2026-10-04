@@ -377,33 +377,64 @@ window.__ModuleLoader__.load({
     // `<｜｜DSML｜｜ calls>…` 标记、或通用 `<tool_call>…`）。流式阶段就要清掉：
     // 未闭合的开标记一直吃到结尾，否则用户会看到半截标记越滚越长。
     /* @btw-sanitize:start */
-    const TOOL_MARKUP_OPEN = /<(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<tool_call>|<tool_calls>|<function_call>/i
-    const TOOL_MARKUP_CLOSE = /<\/(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<\/tool_call>|<\/tool_calls>|<\/function_call>/i
+    /** 任何"工具调用标记"的开或闭标签（DSMlish 或通用 <tool_call> 家族）。 */
+    const TOOL_TAG = /<(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<\/(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<tool_call>|<tool_calls>|<function_call>|<\/tool_call>|<\/tool_calls>|<\/function_call>/gi
 
     /**
      * 剥掉写成文本的工具调用标记。
+     *
+     * 单遍深度计数，而不是"开标记 + 最近的闭标记"：后者遇到嵌套或名字不配对的
+     * 标记会落下孤立闭标记（`</｜｜DSML｜｜ invoke>` 这种会留在屏幕上）。
+     * 深度回到 0 之前的内容一律不输出；深度为 0 时出现的闭标记当孤立标记丢掉。
+     *
+     * 收尾时仍处于未闭合状态（模型输出本身就不配对）：
+     *  - `streaming` 为真：截断到那个开标记之前——正在写的调用内部不该给用户看；
+     *  - 已完结：把没配对的标记当孤立标签丢掉，保留其后的正文（否则会白掉一段结尾）。
      * @param source - 模型输出。
+     * @param streaming - 是否仍在流式生成中。
      * @returns 清理后的文本，以及是否剥掉过东西（调用方据此补一句"未执行"）。
      */
-    function sanitizeAnswer(source) {
-      let text = String(source)
+    function sanitizeAnswer(source, streaming) {
+      const text = String(source)
+      let out = ''
+      let depth = 0
+      let last = 0
+      let regionStart = 0
       let stripped = false
-      const open = new RegExp(TOOL_MARKUP_OPEN.source, 'i')
-      const close = new RegExp(TOOL_MARKUP_CLOSE.source, 'i')
-      for (;;) {
-        const found = open.exec(text)
-        if (found === null) break
-        const rest = text.slice(found.index + found[0].length)
-        const paired = close.exec(rest)
-        stripped = true
-        if (paired === null) {
-          text = text.slice(0, found.index)
-          break
+      const pattern = new RegExp(TOOL_TAG.source, 'gi')
+      let match
+      while ((match = pattern.exec(text)) !== null) {
+        const closing = match[0].charAt(1) === '/'
+        if (depth === 0) {
+          // 深度 0：前面的正文留下；开标记开启一个新区域，孤立的闭标记直接丢掉
+          out += text.slice(last, match.index)
+          stripped = true
+          if (!closing) {
+            depth = 1
+            regionStart = match.index
+          }
+          last = match.index + match[0].length
+          continue
         }
-        text = text.slice(0, found.index) + rest.slice(paired.index + paired[0].length)
+        // 区域内部：内容整段丢弃，只数深度
+        stripped = true
+        depth += closing ? -1 : 1
+        last = match.index + match[0].length
       }
-      if (stripped) text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+$/gm, '').trim()
-      return { text, stripped }
+
+      if (depth > 0) {
+        if (streaming === true) return { text: tidy(out), stripped: true }
+        const tail = text.slice(regionStart).replace(new RegExp(TOOL_TAG.source, 'gi'), '')
+        return { text: tidy(out + tail), stripped: true }
+      }
+      if (!stripped) return { text, stripped: false }
+      out += text.slice(last)
+      return { text: tidy(out), stripped: true }
+    }
+
+    /** 剥完后收一下空白。 */
+    function tidy(text) {
+      return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+$/gm, '').trim()
     }
     /* @btw-sanitize:end */
 
@@ -697,7 +728,7 @@ window.__ModuleLoader__.load({
       }
 
       const turnOf = (item, key, streaming) => {
-        const answer = sanitizeAnswer(item.answer)
+        const answer = sanitizeAnswer(item.answer, streaming === true)
         return React.createElement('div', { className: 'dshbtw-turn', key },
           React.createElement('div', { className: 'dshbtw-userRow' },
             React.createElement('div', { className: 'dshbtw-bubble' }, item.question)),

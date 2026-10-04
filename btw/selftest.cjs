@@ -287,9 +287,33 @@ async function main() {
     assert.equal(paired.text, '看这个：就这些。')
 
     // 流式：未闭合的开标记一直吃到结尾，用户不会看到滚动的半截标记
-    const open = sanitizeAnswer('答案前\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="pwsh">')
+    const open = sanitizeAnswer('答案前\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="pwsh">', true)
     assert.equal(open.stripped, true)
     assert.equal(open.text, '答案前')
+
+    // 已完结但标记不配对：丢掉孤立标记，保留其后的正文（不能白掉结尾）
+    const settled = sanitizeAnswer('答案前\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="pwsh">', false)
+    assert.equal(settled.text, '答案前')
+
+    const settledTail = sanitizeAnswer('先看：<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="pwsh">完了。', false)
+    assert.equal(settledTail.text, '先看：完了。')
+
+    // 孤立闭标记（嵌套配对后落下的那种，曾直接显示在屏幕上）
+    const orphans = sanitizeAnswer('</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>')
+    assert.equal(orphans.stripped, true)
+    assert.equal(orphans.text, '')
+
+    const orphanInText = sanitizeAnswer('你好\n</｜｜DSML｜｜ invoke>\n后面')
+    // 独占一行的孤立标记会留下一个空行——可接受，不为了它去合并正常的段落间距
+    assert.equal(orphanInText.text, '你好\n\n后面')
+
+    // 嵌套（名字不配对）：整段吞掉，不留残渣
+    const nested = sanitizeAnswer('<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>')
+    assert.equal(nested.stripped, true)
+    assert.equal(nested.text, '')
+
+    const surrounded = sanitizeAnswer('前<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke>x</｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>后')
+    assert.equal(surrounded.text, '前后')
 
     const generic = sanitizeAnswer('a<tool_call>{"n":1}</tool_call>b')
     assert.equal(generic.stripped, true)

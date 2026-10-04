@@ -123,34 +123,53 @@ function resolveCallConfig(ctx, agent) {
   return undefined
 }
 
-/** 剥掉"写成文本的工具调用"标记：旁支提问没有工具，这类标记没有任何意义，
- *  重放回模型只会诱导它继续乱写。
- *  客户端渲染用的是同一套规则（client.js 的 sanitizeAnswer），两边各自保留一份，
- *  以免宿主半边为了一个正则去 require 客户端模块。 */
-const TOOL_MARKUP_OPEN = /<(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<tool_call>|<tool_calls>|<function_call>/i
-const TOOL_MARKUP_CLOSE = /<\/(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<\/tool_call>|<\/tool_calls>|<\/function_call>/i
+/** 任何"工具调用标记"的开或闭标签（DSMlish 或通用 <tool_call> 家族）。 */
+const TOOL_TAG = /<(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<\/(?:\|{1,2}|｜{1,2})?DSML(?:\|{1,2}|｜{1,2})?[^>]*>|<tool_call>|<tool_calls>|<function_call>|<\/tool_call>|<\/tool_calls>|<\/function_call>/gi
 
 /**
- * 剥掉写成文本的工具调用标记。
+ * 剥掉写成文本的工具调用标记：旁支提问没有工具，这类标记没有任何意义，
+ * 重放回模型只会诱导它继续乱写。
+ *
+ * 单遍深度计数，和客户端 `sanitizeAnswer` 同一套规则：嵌套或名字不配对的标记
+ * 不会落下孤立闭标记（`</｜｜DSML｜｜ invoke>` 会留在屏幕上）。
  * @param source - 模型输出。
  * @returns 清理后的文本。
  */
 function stripToolMarkup(source) {
-  let text = String(source)
-  const open = new RegExp(TOOL_MARKUP_OPEN.source, 'i')
-  const close = new RegExp(TOOL_MARKUP_CLOSE.source, 'i')
-  for (;;) {
-    const found = open.exec(text)
-    if (found === null) break
-    const rest = text.slice(found.index + found[0].length)
-    const paired = close.exec(rest)
-    if (paired === null) {
-      text = text.slice(0, found.index)
-      break
+  const text = String(source)
+  let out = ''
+  let depth = 0
+  let last = 0
+  let regionStart = 0
+  let stripped = false
+  const pattern = new RegExp(TOOL_TAG.source, 'gi')
+  let match
+  while ((match = pattern.exec(text)) !== null) {
+    const closing = match[0].charAt(1) === '/'
+    if (depth === 0) {
+      // 深度 0：前面的正文留下；开标记开启一个新区域，孤立的闭标记直接丢掉
+      out += text.slice(last, match.index)
+      stripped = true
+      if (!closing) {
+        depth = 1
+        regionStart = match.index
+      }
+      last = match.index + match[0].length
+      continue
     }
-    text = text.slice(0, found.index) + rest.slice(paired.index + paired[0].length)
+    // 区域内部：内容整段丢弃，只数深度
+    stripped = true
+    depth += closing ? -1 : 1
+    last = match.index + match[0].length
   }
-  return text.replace(/\n{3,}/g, '\n\n').trim()
+  if (depth > 0) {
+    // 已完结的回答里仍不配对：把没配对的标记当孤立标签丢掉，保留其后的正文
+    const tail = text.slice(regionStart).replace(new RegExp(TOOL_TAG.source, 'gi'), '')
+    return (out + tail).replace(/\n{3,}/g, '\n\n').trim()
+  }
+  if (!stripped) return text
+  out += text.slice(last)
+  return out.replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /**
