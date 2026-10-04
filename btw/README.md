@@ -11,10 +11,27 @@
 | 回答不进历史 | 宿主半边只读 `session.deriveMessages()`，从不 `append` 任何 session 事件 |
 | 无工具 | 请求不带 `tools`；不走 agent loop，因此不存在工具循环 |
 | 单次响应 | 只发一次 `ctx.llm.stream()`，不占 turn/step |
-| 看得到"到目前为止"，看不到正在写的那条回复 | chunk 事件不是 surface 节点，`deriveMessages()` 天然不含未完成的 assistant 消息 |
-| 省 token | 复用同一份对话前缀（含 system 消息），命中提供方的 prompt cache |
+| **不会以为自己是主会话** | **不复用会话历史**：把最近 ~48K 字符压成纯文本放进 `<conversation>` 标签，连同 `<question>` 一起作为**一条 user 消息**；再给一个真正的 `system` 引导词（见下） |
+| **不会模仿工具调用** | 转录里工具调用被压成一行 `[tool call: name]`、结果变成 `tool result: …`——**上下文里不再有任何工具调用语法**，模型无从模仿 |
+| 省 token / 快 | 输入从 ~190k token 降到 ~12k；实测同一问题 2–3 分钟 → **4.5 秒** |
+| 看得到"到目前为止" | 转录取自语义投影，不含正在写的那条回复 |
 | 不落盘 | 线程只存宿主内存（每会话最多 20 轮）+ 组件状态；不写 localStorage、不写会话日志 |
 | 不打断主回合 | 与主回合的 signal、goal/todo/compaction、轨迹完全隔离 |
+
+### 引导提示词（可覆盖）
+
+宿主用 `ctx.llm.stream({ system: guidance, ... })` 发一段真·系统提示词，默认值（`host.js` 的 `GUIDANCE`）：
+
+> You answer quick side questions about an ongoing coding session. The recent conversation is provided as reference inside `<conversation>` tags; the question follows inside `<question>` tags. That transcript is reference material only. Its tool calls were made by the main agent, not by you: you are not the main agent, and you are not continuing its work. You have no tools. Never emit tool calls or tool-call syntax in any form, and never claim to have run, read, edited, or checked anything. If an action seems necessary, describe it in plain prose instead. Answer directly and concisely, in the language of the question… If the context does not contain the answer, say so plainly in one line — do not invent, do not ask follow-up questions, and do not ask for permission to act.
+
+要按自己的口味改，在 profile 的 `cordis.patch.yml` 里覆盖该行 config 即可：
+
+```yaml
+- id: btw
+  config:
+    guidance: |
+      你的引导词……
+```
 
 ## 视觉对齐主会话
 
@@ -59,39 +76,40 @@
 - 不提供"临时聊天"（无父上下文、关闭即焚的独立会话）——社区插件 dsh-btw 有，见下。
 - 桌面端窗口重启后线程消失——这是设计，不是缺陷。
 
-## 踩过的三个坑（都已有回归测试）
+## 踩过的坑（都有回归测试）
 
+0. **最大的坑：把主会话历史当自己的历史重放。**
+   最初实现直接拿 `session.deriveMessages()` 当 messages 发出去（只追加一条问题）。结果：上下文里
+   成千上万条工具调用样例 → 模型疯狂模仿 `<｜｜DSML｜｜ …>`；它还把自己当主会话（"我先取证/我去查"）。
+   往 prompt 里写"你没有工具"完全压不住。正解来自社区插件 **dsh-btw**（见下）：**根本没有历史**——
+   转录是被引用的文本，请求只有一条 user 消息 + 一段 system 引导词。
 1. **客户端插件不能 require app 内部的普通 ESM 库。**
    `@deepseek-ai/dsh-client-ui-primitives` 不是 `__ModuleLoader__` 模块（它被 app 自己打包进去），
    在 client.js 里 `require` 它会在加载期抛错，整个客户端半边失效、右侧栏只剩空壳。
    所以图标改为内联官方路径数据、Markdown 自带轻量实现。
-2. **重放历史里的 assistant 消息必须带 `source`。**
+2. **重放 assistant 消息必须带 `source`**（旧实现遗留知识）。
    `ctx.llm.stream()` 的 `forAdapter()` 会对每条 `role: 'assistant'` 的消息读
-   `message.source.replayState`；缺 `source` 直接抛
-   `Cannot read properties of undefined (reading 'replayState')`，表现为第二问必炸。
-   现在补 `{ kind: 'model', provider, model }`。
-3. **模型会把工具调用写成文本**（DeepSeek 的 `<｜｜DSML｜｜ …>`、`<tool_call>`）。
-   宿主重放前先剥掉（否则诱导它继续乱写），客户端渲染时也剥，并补一句
-   "旁支提问没有工具，上面的工具调用没有被执行"。
-   清理用的是**单遍深度计数**（客户端 `sanitizeAnswer`、宿主 `stripToolMarkup` 同一套规则），
-   不是"一个开标记配对最近的一个闭标记"——后者遇到嵌套或名字不配对的标记会落下
-   **孤立闭标记**（`</｜｜DSML｜｜ invoke>` 直接显示在屏幕上，真机上就是这个症状）。
-   流式中未闭合的调用：截断在开标记之前；已完结的回答：把不配对的标记当孤立标签丢掉，
-   保留其后的正文（否则结尾会白掉一段）。
+   `message.source.replayState`，缺 `source` 直接抛
+   `Cannot read properties of undefined (reading 'replayState')`。现在不再重放 assistant 消息。
+3. **模型仍可能把工具调用写成文本**（DeepSeek 的 `<｜｜DSML｜｜ …>`、`<tool_call>`）。
+   转录里已经不产生这种语法；万一仍写出来，宿主与客户端各有一份**单遍深度计数**清理器
+   （`stripToolMarkup` / `sanitizeAnswer`：配对、嵌套、孤立闭标记、流式未闭合都能处理）。
 
-## 生态里已有的同类插件（2026-10 查证）
+## 生态对照与署名
 
-- **npm/`dsh-btw`（iluluyu）** — <https://www.npmjs.com/package/dsh-btw> · <https://github.com/iluluyu/dsh-btw>
-  `/btw` 答案显示在**输入框上方的临时面板**（Esc 关闭），另有一个**右上角「临时聊天」**入口
-  （无父上下文、不落盘、关闭即焚）。README 的装法是 `dsh plugin --profile web add dsh-btw`，面向 web profile。
-- **MichengAI/dsh-btw** — 一次性只读旁问，独立气泡，不执行工具。
-- **WLV-ZEDD/dsh-btw** — Side-Assistant Dock & Drawer。
-- 插件索引：[Sakana-yuyu/dsh-plugins](https://github.com/Sakana-yuyu/dsh-plugins)（topic:dsh-plugin，按 stars）、
-  [SihanTeng/awesome-deepseek-harness-plugins](https://github.com/SihanTeng/awesome-deepseek-harness-plugins)、
-  [bradeGithub/DSH-Plugins-Marketplace](https://github.com/bradeGithub/DSH-Plugins-Marketplace)。
+请求构造方式（转录引用 + 单条 user 消息 + system 引导词）来自社区插件
+[`dsh-btw`](https://www.npmjs.com/package/dsh-btw)（作者 **iluluyu**，MIT）：
+`npm pack dsh-btw` 后读它的 `lib/index.js` 得到的方案，本插件按 MIT 精神复用其思路与
+引导词取向（未拷贝代码，但 `ASK_SYSTEM` 的框架基本照搬）。它另有「临时聊天」
+（一次性子 agent + 崩溃残留回收），本插件未实现。
 
-与社区版的差别：本插件的入口是**右侧栏「开始」页的卡片**、面板内**支持多轮追问与折叠思考行**，
-并按运行中的 desktop profile（0.2.0-rc.2）实测；社区版多了"临时聊天"。
+其余同类：**MichengAI/dsh-btw**（一次性只读旁问，独立气泡）、**WLV-ZEDD/dsh-btw**（Side-Assistant Dock & Drawer）。
+插件索引：[Sakana-yuyu/dsh-plugins](https://github.com/Sakana-yuyu/dsh-plugins)（topic:dsh-plugin）、
+[SihanTeng/awesome-deepseek-harness-plugins](https://github.com/SihanTeng/awesome-deepseek-harness-plugins)、
+[bradeGithub/DSH-Plugins-Marketplace](https://github.com/bradeGithub/DSH-Plugins-Marketplace)。
+
+本插件与社区版的差别：入口是**右侧栏「开始」页的卡片**、面板内**支持多轮追问与折叠思考行**，
+按运行中的 desktop profile（0.2.0-rc.2）实测；社区版多了"临时聊天"。
 
 ## 开发与验证
 

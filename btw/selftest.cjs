@@ -101,7 +101,17 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 5))
 async function main() {
   // 1. 正常流
   {
-    const { routes, calls } = harness()
+    const { routes, calls } = harness({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'earlier' }] },
+        {
+          role: 'assistant',
+          content: [{ type: 'tool-call', name: 'pwsh', arguments: { command: 'Get-ChildItem' } }],
+          source: { kind: 'model', provider: 'test-provider', model: 'test-model' },
+        },
+        { role: 'tool', content: [{ type: 'text', text: 'file1\nfile2' }], toolCallId: 'c1' },
+      ],
+    })
     const res = fakeResponse()
     routes.get('/btw-api/ask')(fakeRequest('POST', { sessionId: 's1', question: '第二个问题是什么？' }), res)
     await tick()
@@ -112,7 +122,7 @@ async function main() {
     assert.deepEqual(events.filter((e) => e.type === 'reasoning').map((e) => e.text), ['先想一下'])
     assert.equal(events.filter((e) => e.type === 'finish').length, 1)
 
-    // prompt 组装：完整历史 + 指令 + 问题；不带 tools；带 sessionId
+    // 请求组装：一条 user 消息（<conversation> + <question>）+ 系统引导词；不带 tools
     assert.equal(calls.length, 1)
     const request = calls[0]
     assert.equal(request.provider, 'test-provider')
@@ -120,32 +130,35 @@ async function main() {
     assert.equal(request.tools, undefined, 'no tools may be sent')
     assert.equal(request.sessionId, 's1')
     assert.equal(request.maxTokens, 4096, 'answer token cap clamps the request header value')
-    const messages = request.messages
-    assert.equal(messages.length, 2, 'history + instruction/question')
-    assert.equal(messages[0].content[0].text, 'earlier')
-    const prompt = messages[messages.length - 1]
-    assert.equal(prompt.role, 'user')
-    assert.ok(prompt.content[0].text.includes('side question'), 'carries the no-tools instruction')
-    assert.ok(prompt.content[0].text.includes('第二个问题是什么？'), 'carries the question')
 
-    // 线程累积后第二次追问会带上历史问答
+    // 真·系统提示词，而不是塞在 user 消息里的弱指令
+    assert.ok(typeof request.system === 'string' && request.system.includes('side questions'), 'system guidance is a real system prompt')
+    assert.ok(request.system.includes('are not the main agent'), 'system guidance denies main-agent identity')
+    assert.ok(request.system.includes('Never emit tool calls'), 'system guidance forbids tool syntax')
+
+    const messages = request.messages
+    assert.equal(messages.length, 1, 'one user message only: no replayed history, no tool syntax to imitate')
+    assert.equal(messages[0].role, 'user')
+    const body = messages[0].content[0].text
+    assert.ok(body.startsWith('<conversation>\n'), 'transcript is quoted inside <conversation>')
+    assert.ok(body.includes('earlier'), 'transcript carries the conversation')
+    // 工具调用/结果压成纯文本：信息留着，语法没了（模型无从模仿）
+    assert.ok(body.includes('[tool call: pwsh]'), 'tool calls become plain text lines')
+    assert.ok(body.includes('tool result: file1'), 'tool results are kept as text')
+    assert.ok(body.includes('file2'), 'tool result content is kept')
+    assert.ok(body.includes('<question>\n第二个问题是什么？\n</question>'), 'question is quoted in <question>')
+    assert.ok(!/<\/?[a-z_]*DSML/i.test(body), 'no tool-call markup in the transcript')
+
+    // 线程累积后第二次追问：上一轮问答以**文本**形式追加，而不是重放 assistant 消息
     const res2 = fakeResponse()
     routes.get('/btw-api/ask')(fakeRequest('POST', { sessionId: 's1', question: '再问一次' }), res2)
     await tick()
     const second = calls[1].messages
-    assert.equal(second.length, 4, 'history + 2 replay messages + new question')
-    assert.equal(second[1].content[0].text, '第二个问题是什么？')
-    assert.equal(second[2].role, 'assistant')
-    assert.equal(second[2].content[0].text, '答案是 42')
-    // 每条 assistant 消息都要能通过 llm 服务的 forAdapter() 检查（读 source.replayState）
-    assert.equal(second[2].source.kind, 'model')
-    assert.equal(second[2].source.provider, 'test-provider')
-    assert.equal(second[2].source.replayState, undefined)
-    for (const message of second) {
-      if (message.role === 'assistant') assert.ok(message.source !== undefined, 'assistant messages need a source')
-    }
-    assert.equal(second[1].source.kind, 'user')
-    assert.equal(second[3].source.kind, 'user')
+    assert.equal(second.length, 1, 'still a single user message')
+    const secondBody = second[0].content[0].text
+    assert.ok(secondBody.includes('earlier side question): 第二个问题是什么？'), 'previous question is carried as text')
+    assert.ok(secondBody.includes('earlier side answer): 答案是 42'), 'previous answer is carried as text')
+    assert.ok(secondBody.includes('<question>\n再问一次\n</question>'))
   }
 
   // 2. 线程快照 / 清空
@@ -327,7 +340,7 @@ async function main() {
     assert.equal(onlyMarkup.text, '')
   }
 
-  // 6. 重放给模型的 assistant 文本要先剥掉伪工具调用标记
+  // 6. 上一轮回答进转录时要先剥掉伪工具调用标记
   {
     const { routes, calls } = harness({ markupAnswer: true })
     routes.get('/btw-api/clear')(fakeRequest('POST', { sessionId: 's1' }), fakeResponse())
@@ -336,9 +349,9 @@ async function main() {
     await tick()
     routes.get('/btw-api/ask')(fakeRequest('POST', { sessionId: 's1', question: '第二问' }), fakeResponse())
     await tick()
-    const replayed = calls[1].messages.find((message) => message.role === 'assistant')
-    assert.equal(replayed.content[0].text, '先看：完了。')
-    assert.ok(!replayed.content[0].text.includes('DSML'), 'markup must not be replayed to the model')
+    const body = calls[1].messages[0].content[0].text
+    assert.ok(body.includes('earlier side answer): 先看：完了。'), 'previous answer is carried, cleaned')
+    assert.ok(!body.includes('DSML'), 'markup must not be replayed to the model')
   }
 
   // 8. 思考行摘要（纯函数，从标记区间取出）

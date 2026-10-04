@@ -27,14 +27,29 @@ const THREAD_LIMIT = 20
 /** 旁支提问的输出上限：够长到能解释，又不至于把主回合的额度吃掉。 */
 const ANSWER_MAX_TOKENS = 4096
 
-/** 追加在问题前的固定指令：告诉模型这是旁支提问、没有工具、只能依据已有上下文。 */
-const INSTRUCTION = [
-  'The following is a side question ("BTW") about the conversation above.',
-  'It is not part of the conversation history, and no tools are available for it:',
-  'answer from the conversation above alone, in the language of the question.',
-  'If the context does not contain the answer, say so plainly instead of guessing.',
-  'Do not emit tool calls.',
+/**
+ * 旁支提问的引导词。
+ *
+ * 为什么需要这么重：请求复用的是主会话的完整前缀（含大量工具调用与"接下来我要执行…"），
+ * 模型极容易把自己当主会话继续干活。这里用四条例外声明直接掐掉三类失败模式：
+ * 输出工具调用标记、声称/暗示要执行动作、把上面的转录当成自己的待办。
+ *
+ * 做法照社区 dsh-btw（author iluluyu, MIT）：**不复用会话历史**，而是把最近一段对话
+ * 压成纯文本放进一条 user 消息的 <conversation> 标签里，再给一个真正的 system 提示词。
+ * 旧做法（replay `deriveMessages()` 当自己的历史）必然失败：上下文里全是工具调用样例，
+ * 模型只会照着模仿 DSML，还把自己当成主会话继续干活。
+ */
+const GUIDANCE = [
+  'You answer quick side questions about an ongoing coding session.',
+  'The recent conversation is provided as reference inside <conversation> tags; the question follows inside <question> tags.',
+  'That transcript is reference material only. Its tool calls were made by the main agent, not by you: you are not the main agent, and you are not continuing its work.',
+  'You have no tools. Never emit tool calls or tool-call syntax in any form, and never claim to have run, read, edited, or checked anything. If an action seems necessary, describe it in plain prose instead.',
+  'Answer directly and concisely, in the language of the question. Quote exact paths, names, and decisions from the context when they matter.',
+  'If the context does not contain the answer, say so plainly in one line — do not invent, do not ask follow-up questions, and do not ask for permission to act.',
 ].join(' ')
+
+/** 转录上限（字符）：只带最近一段，请求因此从 ~190k token 降到 ~12k。 */
+const TRANSCRIPT_MAX = 48_000
 
 /** 每会话一个内存线程：`{ question, answer }` 按时间升序。 */
 const threads = new Map()
@@ -173,32 +188,71 @@ function stripToolMarkup(source) {
 }
 
 /**
- * 组装这一次临时提问请求的消息数组：完整前缀 + 已在内存里的历史问答 + 本次问题。
- *
- * 历史里那条 assistant 消息**必须带 `source`**：`ctx.llm.stream()` 内部会对每条
- * assistant 消息读 `message.source.replayState`（`forAdapter()`，用于剔除属于别的
- * 适配器的重放状态），缺 `source` 会直接抛
- * "Cannot read properties of undefined (reading 'replayState')"。
- * 这里按当前路由补一个不带 replayState 的 model source，语义上等于正常重放。
+ * 把一条消息的内容块压成纯文本：文本保留、工具调用变一行 `[tool call: name]`、
+ * 图片标 `[image]`、思考（reasoning）不入转录。**绝不保留任何工具调用语法**，
+ * 否则模型又会照着模仿。
  */
-function buildMessages(session, thread, question, config) {
-  const messages = [...session.deriveMessages()]
-  for (const item of thread) {
-    messages.push({ role: 'user', content: [{ type: 'text', text: item.question }], source: { kind: 'user' } })
-    messages.push({
-      role: 'assistant',
-      content: [{ type: 'text', text: stripToolMarkup(item.answer) }],
-      source: { kind: 'model', provider: config.provider, model: config.model },
-    })
+function blocksToText(content, toolArgChars = 200) {
+  if (!Array.isArray(content)) return ''
+  const parts = []
+  for (const block of content) {
+    if (block === null || typeof block !== 'object') continue
+    if (block.type === 'text' && typeof block.text === 'string' && block.text !== '') parts.push(block.text)
+    else if (block.type === 'tool-call') {
+      const name = typeof block.name === 'string' && block.name !== '' ? block.name : 'tool'
+      let args = ''
+      if (typeof block.arguments === 'string') args = block.arguments
+      else if (block.arguments !== undefined) {
+        try { args = JSON.stringify(block.arguments) } catch { args = '' }
+      }
+      parts.push(`[tool call: ${name}]${args === '' ? '' : ` ${args.slice(0, toolArgChars)}`}`)
+    } else if (block.type === 'image') parts.push('[image]')
   }
-  messages.push({ role: 'user', content: [{ type: 'text', text: `${INSTRUCTION}\n\n${question}` }], source: { kind: 'user' } })
-  return messages
+  return parts.join('\n').trim()
+}
+
+/**
+ * 把会话压成一段转录文本（最近 TRANSCRIPT_MAX 字符），并在末尾附上本次线程里
+ * 已经问过的旁支问答，让追问仍然连贯。
+ */
+function buildTranscript(session, thread) {
+  const lines = []
+  for (const message of session.deriveMessages()) {
+    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'tool') continue
+    const text = blocksToText(message.content)
+    if (text === '') continue
+    const speaker = message.role === 'tool' ? 'tool result' : message.role
+    lines.push(`${speaker}: ${text}`)
+  }
+  for (const item of thread) {
+    lines.push(`user (earlier side question): ${item.question}`)
+    lines.push(`you (earlier side answer): ${stripToolMarkup(item.answer)}`)
+  }
+  const transcript = lines.join('\n\n')
+  return transcript.length > TRANSCRIPT_MAX ? transcript.slice(transcript.length - TRANSCRIPT_MAX) : transcript
+}
+
+/**
+ * 组装这一次临时提问的请求：一条 user 消息（<conversation> + <question>）+ 系统引导词。
+ * 无历史、无工具、无 API 层的工具语法 → 模型没有可模仿的样例，也不会以为自己是主会话。
+ */
+function buildMessages(session, thread, question) {
+  const transcript = buildTranscript(session, thread)
+  const body = transcript === ''
+    ? `<question>\n${question}\n</question>`
+    : `<conversation>\n${transcript}\n</conversation>\n\n<question>\n${question}\n</question>`
+  return [{ role: 'user', content: [{ type: 'text', text: body }], source: { kind: 'user' } }]
 }
 
 module.exports = {
   name: NAME,
   inject: ['webServer', 'agents', 'llm'],
-  apply(ctx) {
+  apply(ctx, config = {}) {
+    // 引导词可被组合包/用户 profile 的 config.guidance 覆盖（见本文件顶部说明）。
+    const guidance = typeof config.guidance === 'string' && config.guidance.trim() !== ''
+      ? config.guidance
+      : GUIDANCE
+
     /** 处理一次临时提问，把回答以 SSE 流式写回。 */
     async function ask(req, res) {
       let body
@@ -249,9 +303,10 @@ module.exports = {
       let reasoning = ''
       let failure
       try {
-        const messages = buildMessages(agent.session, thread, question, config)
+        const messages = buildMessages(agent.session, thread, question)
         const stream = ctx.llm.stream({
           ...config,
+          system: guidance,
           messages,
           sessionId,
           signal: controller.signal,

@@ -84,46 +84,65 @@ window.__ModuleLoader__.load({
       '.dshbtw-turn:last-child{margin-bottom:4px}',
       '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px}',
       '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 82%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
-      '.dshbtw-answer{min-width:0;color:var(--dsw-alias-label-primary);font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px))}',
+      '.dshbtw-answer{min-width:0}',
 
-      // 思考行：照主会话 ReasoningRow 的规格——折叠高度 24px、标题 400 字重、
-      // 2px 圆点分隔符、次要字号摘要、流式时右侧渐隐 + 微光。
-      '.dshbtw-think{display:flex;flex-direction:column;margin-bottom:6px}',
-      '.dshbtw-think:not([data-expanded]){height:calc(24px + var(--dsh-content-font-delta,0px))}',
-      '.dshbtw-thinkRow{display:flex;align-items:center;box-sizing:border-box;width:100%;height:100%;padding:0 8px 0 2px;border:0;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));text-align:left;cursor:pointer;overflow:hidden}',
+      // 思考行：逐条照 primitives 的 DisclosureRow.module.css 与 ui-chat 的
+      // ReasoningRow.module.css——行高 24px+delta、标题 13/24、leading 是 16px 盒
+      // （图标 14px，hover 时图标让位给箭头）、2px 圆点分隔符、13/20 摘要、
+      // 流式右侧渐隐 + 微光。
+      '.dshbtw-think{display:flex;flex-direction:column;width:100%;min-width:0;margin-bottom:6px}',
+      '.dshbtw-thinkRow{position:relative;display:flex;align-items:center;box-sizing:border-box;width:100%;height:calc(24px + var(--dsh-content-font-delta,0px));min-width:0;padding:0;border:0;background:none;color:var(--dsw-alias-label-tertiary);font:inherit;text-align:left;cursor:pointer;overflow:hidden;transition:color 100ms ease}',
       '.dshbtw-thinkRow:hover{color:var(--dsw-alias-label-secondary)}',
-      '.dshbtw-thinkLeading{flex:none;display:inline-flex;align-items:center;gap:2px}',
-      '.dshbtw-thinkChevron{display:inline-flex;transition:transform .12s}',
-      '.dshbtw-think[data-expanded] .dshbtw-thinkChevron{transform:rotate(180deg)}',
-      '.dshbtw-thinkTitle{flex:none;font-weight:400}',
+      '.dshbtw-thinkLeading{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px));margin-right:6px}',
+      '.dshbtw-thinkLeading svg{width:calc(14px + var(--dsh-content-font-delta,0px));height:calc(14px + var(--dsh-content-font-delta,0px))}',
+      '.dshbtw-thinkIcon{display:inline-flex;opacity:1;transition:opacity 100ms ease}',
+      '.dshbtw-thinkChevron{position:absolute;inset:0;margin:auto;display:inline-flex;opacity:0;transition:opacity 100ms ease,transform .12s}',
+      '.dshbtw-thinkRow:hover .dshbtw-thinkIcon{opacity:0}',
+      '.dshbtw-thinkRow:hover .dshbtw-thinkChevron{opacity:1}',
+      '.dshbtw-think[data-expanded] .dshbtw-thinkIcon{display:none}',
+      '.dshbtw-think[data-expanded] .dshbtw-thinkChevron{opacity:1;transform:rotate(180deg)}',
+      '.dshbtw-thinkTitle{flex:none;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));font-weight:400;color:inherit}',
       '.dshbtw-thinkSep{flex:none;width:2px;height:2px;margin:0 8px;border-radius:1px;background:var(--dsw-alias-label-caption)}',
       '.dshbtw-thinkSummary{flex:auto;min-width:0;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));white-space:nowrap;overflow:hidden}',
       '.dshbtw-thinkSummary[data-streaming]{mask-image:linear-gradient(90deg,#000 calc(100% - 48px),transparent)}',
       '.dshbtw-thinkSummaryText{display:block;overflow:hidden;text-overflow:ellipsis}',
       '.dshbtw-thinkSummary[data-streaming] .dshbtw-thinkSummaryText{text-overflow:clip;overflow:visible;background-image:linear-gradient(90deg,var(--dsw-alias-label-deep-diving,#8b8f96) 0%,var(--dsw-alias-label-deep-diving-shimmer,var(--dsw-alias-label-primary,#fff)) 50%,var(--dsw-alias-label-deep-diving,#8b8f96) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:dshbtw-shimmer 1.6s linear infinite}',
       '@keyframes dshbtw-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}',
-      '.dshbtw-thinkBody{padding:4px 0 4px calc(22px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
-      '.dshbtw-error{margin:0 16px 8px;padding:6px 10px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(18px + var(--dsh-content-font-delta-secondary,0px));word-break:break-word}',
+      '.dshbtw-thinkBody{padding:4px 0 4px calc(22px + var(--dsh-content-font-delta,0px));min-width:0}',
 
-      // Markdown 元素：间距与主会话正文一致，配色走 markdown 专用 token。
-      '.dshbtw-p{margin:0 0 10px;white-space:pre-wrap;word-break:break-word}',
-      '.dshbtw-p:last-child{margin-bottom:0}',
-      '.dshbtw-h{margin:14px 0 8px;font-weight:600}',
-      '.dshbtw-h:first-child{margin-top:0}',
-      '.dshbtw-h[data-level="1"]{font-size:1.25em}',
-      '.dshbtw-h[data-level="2"]{font-size:1.15em}',
-      '.dshbtw-h[data-level="3"]{font-size:1.05em}',
-      '.dshbtw-list{margin:0 0 10px;padding-left:22px}',
-      '.dshbtw-list:last-child{margin-bottom:0}',
-      '.dshbtw-list li{margin:2px 0;word-break:break-word}',
-      '.dshbtw-quote{margin:0 0 10px;padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}',
-      '.dshbtw-inlineCode{padding:1px 5px;border-radius:var(--dsw-radius-sm,6px);background:var(--dsw-alias-markdown-inline-code);font-family:' + MONO + ';font-size:.92em}',
-      '.dshbtw-link{color:var(--dsw-alias-link)}',
-      '.dshbtw-code{margin:0 0 10px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-markdown-code-block);overflow:hidden}',
-      '.dshbtw-code:last-child{margin-bottom:0}',
-      '.dshbtw-codeHead{display:flex;align-items:center;gap:8px;padding:2px 6px 2px 12px;background:var(--dsw-alias-markdown-code-block-banner);color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
-      '.dshbtw-codeLang{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshbtw-codePre{box-sizing:border-box;margin:0;padding:10px 12px 12px;overflow-x:auto;white-space:pre;font-family:' + MONO + ';font-size:.92em;line-height:1.55;color:var(--dsw-alias-label-primary)}',
+      // Markdown：逐条照 primitives 的 markdown/MarkdownText.module.css，
+      // body 变体与 compact 变体都取原值（含 first/last child 的 !important 归零）。
+      '.dshbtw-md{min-width:0;overflow-wrap:anywhere;font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-primary)}',
+      '.dshbtw-md>*:first-child{margin-top:0!important}',
+      '.dshbtw-md>*:last-child{margin-bottom:0!important}',
+      '.dshbtw-md strong{font-weight:600}',
+      '.dshbtw-md h1{font-size:calc(21px + var(--dsh-content-font-delta,0px));line-height:calc(30px + var(--dsh-content-font-delta,0px));font-weight:700;margin:32px 0 16px}',
+      '.dshbtw-md h2{font-size:calc(19px + var(--dsh-content-font-delta,0px));line-height:calc(28px + var(--dsh-content-font-delta,0px));font-weight:700;margin:32px 0 16px}',
+      '.dshbtw-md h3{font-size:calc(18px + var(--dsh-content-font-delta,0px));line-height:calc(26px + var(--dsh-content-font-delta,0px));font-weight:700;margin:32px 0 16px}',
+      '.dshbtw-md h4{font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));font-weight:600;margin:16px 0}',
+      '.dshbtw-md h5,.dshbtw-md h6{font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));font-weight:600;margin:16px 0}',
+      '.dshbtw-md p{margin:16px 0;white-space:pre-wrap;word-break:break-word}',
+      '.dshbtw-md ul,.dshbtw-md ol{margin:16px 0;padding-left:18px}',
+      '.dshbtw-md li:not(:first-child){margin-top:6px}',
+      '.dshbtw-md li::marker{line-height:24px;color:var(--dsw-alias-label-secondary)}',
+      '.dshbtw-md blockquote{border-left:2px solid var(--dsw-alias-label-caption);margin:16px 0 0;padding-left:14px}',
+      '.dshbtw-md hr{display:block;border:none;height:.5px;margin:32px 0;background:var(--dsw-alias-border-l2)}',
+      '.dshbtw-md :not(pre)>code{display:inline-flex;align-items:center;box-sizing:border-box;font-family:var(--ds-font-family-code,' + MONO + ');font-size:.875em;background-color:var(--dsw-alias-markdown-inline-code);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm,6px);padding:0 5px}',
+      '.dshbtw-md a{color:var(--dsw-alias-link);font-weight:500;text-decoration:none}',
+      '.dshbtw-md[data-compact="1"]{font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));color:var(--dsw-alias-label-tertiary)}',
+      '.dshbtw-md[data-compact="1"] :is(p,ul,ol,blockquote){margin:4px 0}',
+      '.dshbtw-md[data-compact="1"] blockquote{padding-left:8px}',
+      '.dshbtw-md[data-compact="1"] :is(h1,h2,h3,h4,h5,h6){font-size:inherit;line-height:inherit;font-weight:600;margin:8px 0}',
+      '.dshbtw-md[data-compact="1"] :not(pre)>code{display:inline;font-size:1em;border-radius:var(--dsw-radius-xs,4px);padding:0 3px}',
+
+      // 代码卡：照 primitives 的 markdown/CodeBlock.module.css。
+      '.dshbtw-code{position:relative;margin:16px 0;border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-markdown-code-block);color:var(--dsw-alias-label-primary)}',
+      '.dshbtw-codeHead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 14px;border-radius:var(--dsw-radius-lg,12px) var(--dsw-radius-lg,12px) 0 0;background:var(--dsw-alias-markdown-code-block-banner);font-size:11px;line-height:18px}',
+      '.dshbtw-codeLang{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code,' + MONO + ');font-size:11px;line-height:18px}',
+      '.dshbtw-codeCopy{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:var(--dsw-radius-xs,4px);background:transparent;color:inherit;cursor:pointer}',
+      '.dshbtw-codeCopy:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dshbtw-codePre{box-sizing:border-box;margin:0;padding:16px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;border-radius:0 0 var(--dsw-radius-lg,12px) var(--dsw-radius-lg,12px);background:var(--dsw-alias-markdown-code-block);color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code,' + MONO + ');font-size:11px;line-height:19px}',
+      '.dshbtw-error{margin:0 16px 8px;padding:6px 10px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(18px + var(--dsh-content-font-delta-secondary,0px));word-break:break-word}',
 
       // 输入区：复刻主 composer。
       '.dshbtw-composer{flex:none;padding:0 var(--dsh-composer-side-clearance,16px) 12px}',
@@ -464,10 +483,10 @@ window.__ModuleLoader__.load({
     function renderSpans(spans, keyPrefix) {
       return spans.map((span, index) => {
         const key = keyPrefix + ':' + index
-        if (span.type === 'code') return React.createElement('code', { className: 'dshbtw-inlineCode', key }, span.text)
+        if (span.type === 'code') return React.createElement('code', { key }, span.text)
         if (span.type === 'strong') return React.createElement('strong', { key }, span.text)
         if (span.type === 'em') return React.createElement('em', { key }, span.text)
-        if (span.type === 'link') return React.createElement('span', { className: 'dshbtw-link', title: span.href, key }, span.text)
+        if (span.type === 'link') return React.createElement('a', { title: span.href, key }, span.text)
         return React.createElement(React.Fragment, { key }, span.text)
       })
     }
@@ -488,7 +507,7 @@ window.__ModuleLoader__.load({
         React.createElement('div', { className: 'dshbtw-codeHead' },
           React.createElement('span', { className: 'dshbtw-codeLang' }, props.lang === '' ? 'text' : props.lang),
           React.createElement('button', {
-            className: 'dshbtw-ghost',
+            className: 'dshbtw-codeCopy',
             type: 'button',
             title: copied ? t('action.copied') : t('action.copy'),
             'aria-label': copied ? t('action.copied') : t('action.copy'),
@@ -497,25 +516,33 @@ window.__ModuleLoader__.load({
         React.createElement('pre', { className: 'dshbtw-codePre' }, props.text))
     }
 
-    /** Markdown 块 → React 节点。 */
+    /** Markdown 块 → React 节点。语义标签 + `.dshbtw-md` 的后代规则，样式与官方同一套值。 */
     function renderBlocks(blocks, t) {
       return blocks.map((block, index) => {
         const key = 'block:' + index
         if (block.type === 'code') return React.createElement(CodeCard, { key, text: block.text, lang: block.lang, t })
         if (block.type === 'heading') {
-          return React.createElement('div', { className: 'dshbtw-h', 'data-level': block.level, key },
-            renderSpans(block.spans, key))
+          const tag = 'h' + Math.min(6, Math.max(1, block.level))
+          return React.createElement(tag, { key }, renderSpans(block.spans, key))
         }
         if (block.type === 'list') {
           const items = block.items.map((spans, itemIndex) => React.createElement('li', { key: key + ':' + itemIndex },
             renderSpans(spans, key + ':' + itemIndex)))
-          return React.createElement(block.ordered ? 'ol' : 'ul', { className: 'dshbtw-list', key }, items)
+          return React.createElement(block.ordered ? 'ol' : 'ul', { key }, items)
         }
         if (block.type === 'quote') {
-          return React.createElement('blockquote', { className: 'dshbtw-quote', key }, renderSpans(block.spans, key))
+          return React.createElement('blockquote', { key }, renderSpans(block.spans, key))
         }
-        return React.createElement('p', { className: 'dshbtw-p', key }, renderSpans(block.spans, key))
+        return React.createElement('p', { key }, renderSpans(block.spans, key))
       })
+    }
+
+    /** 一段 Markdown → 主会话同款容器：body 变体给回答，compact 变体给思考。 */
+    function markdown(text, compact, t) {
+      return React.createElement('div', {
+        className: 'dshbtw-md',
+        'data-compact': compact === true ? '1' : undefined,
+      }, renderBlocks(parseMarkdown(text), t))
     }
 
     /** 思考行：默认折叠成一行（图标 + 标题 + 末段首行摘要），点一下展开全文。 */
@@ -533,7 +560,7 @@ window.__ModuleLoader__.load({
         onClick: () => setOpen((value) => !value),
       },
       React.createElement('span', { className: 'dshbtw-thinkLeading' },
-        React.createElement(IconThink, {}),
+        React.createElement('span', { className: 'dshbtw-thinkIcon' }, React.createElement(IconThink, {})),
         React.createElement('span', { className: 'dshbtw-thinkChevron' }, React.createElement(IconChevronDown, {}))),
       React.createElement('span', { className: 'dshbtw-thinkTitle' }, props.t('think.title')),
       summary === ''
@@ -545,7 +572,7 @@ window.__ModuleLoader__.load({
             'data-streaming': props.running === true ? '1' : undefined,
           }, React.createElement('span', { className: 'dshbtw-thinkSummaryText' }, summary)))),
       open
-        ? React.createElement('div', { className: 'dshbtw-thinkBody' }, renderBlocks(parseMarkdown(props.text), props.t))
+        ? React.createElement('div', { className: 'dshbtw-thinkBody' }, markdown(props.text, true, props.t))
         : null)
     }
 
@@ -732,7 +759,7 @@ window.__ModuleLoader__.load({
             : React.createElement(ReasoningRow, { text: item.reasoning, running: streaming === true, t }),
           answer.text === ''
             ? null
-            : React.createElement('div', { className: 'dshbtw-answer' }, renderBlocks(parseMarkdown(answer.text), t)))
+            : React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)))
       }
 
       const streaming = live === null
