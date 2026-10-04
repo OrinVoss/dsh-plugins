@@ -492,6 +492,7 @@ This file changed after it was loaded. Use the following content instead of the 
 - 阈值可调：`--threshold 0.18`（正文 4-gram 包含度）、`--stale-days 180`、`--limit 12`、`--max-block-bytes 32768`。
 - **建议节奏**：每次大批写入记忆后跑一次 `lintmemory.cjs`；每月、或健康度卡片显示"该维护了"时，
   跑一次 `memcheck.cjs` 并按清单做合并 / 升格 / 精简。
+- **卡片形态照官方设计系统**（2026-10-04 解 `app.asar` 的 `dsh-client-ui-theme`/`-primitives` 实测）：底色用 `--dsw-alias-markdown-code-block`（官方 CodeCard 的底色；`bg-layer-1` 是**纯白**，与设置页同色＝等于没有卡片）、圆角 `--dsw-radius-md`（=12px，fallback 别写成 8px）、警示用 `--dsw-alias-state-warn-primary`/`-warn-label`（amber）而不是 error 红，状态底纹沿用 Tag 的 `color-mix(..., 10%, ...)` 惯例。`clienttest` 有两条回归守着这些取值。
 - **为什么语义问题不能自动修**：`memory_write` 只有"追加"和"整条覆盖"，没有合并原语；哪两条该并、
   两套数字该信哪套，需要判断。2026-10-04 那次全库修复就是人工判断的结果：llama.cpp 簇 5 条并成 3 条、
   硬件簇 2 条并成 1 条、`gpu-mode-do-not-hardcode` 并入预算条、项目条升全局。

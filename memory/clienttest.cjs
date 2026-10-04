@@ -136,8 +136,8 @@ check('根元素不重复外壳的留白与滚动（外壳 .options 已有 paddi
 check('沿用宿主设置行的规格（0.5px 发丝线 + primitives 的圆角与控件尺寸）', () => {
   const css = styleTags[0].textContent
   assert.ok(css.includes('border-bottom:.5px solid var(--dsw-alias-border-l2)'), '行分隔线应为 0.5px border-l2')
-  assert.ok(css.includes('border-radius:var(--dsw-radius-md,8px)'), '控件圆角应走 --dsw-radius-md 并带兜底')
-  assert.ok(css.includes('border-radius:var(--dsw-radius-sm,6px)'))
+  assert.ok(css.includes('border-radius:var(--dsw-radius-md,12px)'), '控件圆角应走 --dsw-radius-md 并带兜底（官方 12px）')
+  assert.ok(css.includes('border-radius:var(--dsw-radius-sm,8px)'), '控件圆角应走 --dsw-radius-sm 并带兜底（官方 8px）')
   assert.ok(css.includes('height:28px'), '按钮应为 primitives 的 sm 高度')
   assert.ok(css.includes('height:32px'), '输入框/选择器应为 primitives 的 32px')
   assert.ok(css.includes('var(--dsw-alias-button-primary-fill)'), '主按钮应走 primary fill token')
@@ -185,6 +185,31 @@ check('健康度卡片：样式走主题 token、源码只请求 /memory-api/hea
   const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
   assert.ok(src.includes('/memory-api/health'), '客户端应请求 /memory-api/health')
   assert.ok(src.includes('function HealthCard'), '应有 HealthCard 组件')
+})
+
+// 下面两条照着 app.asar 里官方设计系统的实测值写（2026-10-04）：
+//   --dsw-radius-sm: 8px / --dsw-radius-md: 12px
+//   官方卡片底色 = --dsw-alias-markdown-code-block（CodeCard）
+//   官方警示 = --dsw-alias-state-warn-primary / -warn-label（amber）
+check('圆角 fallback 与官方 token 取值一致（曾经写成 6px/8px 是错的）', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
+  assert.ok(src.includes('var(--dsw-radius-md,12px)'), 'radius-md 的 fallback 应是 12px')
+  assert.ok(src.includes('var(--dsw-radius-sm,8px)'), 'radius-sm 的 fallback 应是 8px')
+  assert.ok(!src.includes('var(--dsw-radius-md,8px)'), '不应再把 radius-md 的 fallback 写成 8px')
+  assert.ok(!src.includes('var(--dsw-radius-sm,6px)'), '不应再把 radius-sm 的 fallback 写成 6px')
+})
+
+check('卡片形态对齐官方：官方卡片底色 + amber 警示，不自己发明语义色', () => {
+  const css = styleTags[0].textContent
+  const card = /\.dshmem-health\{([^}]*)\}/.exec(css)
+  assert.ok(card, '找不到 .dshmem-health 规则')
+  assert.ok(card[1].includes('var(--dsw-alias-markdown-code-block)'), '卡片底色应走官方的 markdown-code-block')
+  assert.ok(!card[1].includes('bg-layer-1'), '卡片底色不该用 bg-layer-1（纯白，与页面同色）')
+  const warn = /\.dshmem-healthWarn\{([^}]*)\}/.exec(css)
+  assert.ok(warn, '找不到 .dshmem-healthWarn 规则')
+  assert.ok(warn[1].includes('--dsw-alias-state-warn-primary'), '警示应用官方 warn 色')
+  assert.ok(warn[1].includes('color-mix'), '底纹应沿用官方的 10% color-mix 惯例')
+  assert.ok(!/healthWarn\{[^}]*state-error-primary/.test(css), '警示不该用 error 红（那是「出错了」而不是「快该维护了」）')
 })
 
 check('健康度卡片拿不到报告时不渲染（不挡主流程）', () => {

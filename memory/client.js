@@ -22,23 +22,23 @@ window.__ModuleLoader__.load({
 
       // 页头：图标 + 标题 + 说明（设置面板没有 per-section 标题，页面自己给）
       '.dshmem-head{display:flex;align-items:center;gap:10px;padding:18px 0 14px}',
-      '.dshmem-headIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+      '.dshmem-headIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
       '.dshmem-headText{min-width:0}',
       '.dshmem-headTitle{font-size:16px;font-weight:500;line-height:24px}',
       '.dshmem-headDesc{margin-top:2px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
 
       // 工具栏
       '.dshmem-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:10px}',
-      '.dshmem-search{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;flex:1;min-width:190px;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1)}',
+      '.dshmem-search{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;flex:1;min-width:190px;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1)}',
       '.dshmem-search:focus-within{border-color:var(--dsw-alias-state-business-primary)}',
       '.dshmem-searchIcon{flex:none;display:inline-flex;color:var(--dsw-alias-label-tertiary)}',
       '.dshmem-searchInput{flex:1;min-width:0;border:none;outline:none;background:transparent;padding:0;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}',
       '.dshmem-searchInput::placeholder{color:var(--dsw-alias-label-dimmed)}',
-      '.dshmem-select{box-sizing:border-box;height:32px;max-width:240px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:22px;outline:none}',
+      '.dshmem-select{box-sizing:border-box;height:32px;max-width:240px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:22px;outline:none}',
       '.dshmem-select:focus{border-color:var(--dsw-alias-state-business-primary)}',
 
       // 按钮：primitives/Button.module.css 的 sm 规格
-      '.dshmem-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;border:none;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap}',
+      '.dshmem-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;border:none;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap}',
       '.dshmem-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
       '.dshmem-btn:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}',
       '.dshmem-btn:disabled{cursor:not-allowed;opacity:.4}',
@@ -55,14 +55,17 @@ window.__ModuleLoader__.load({
       '.dshmem-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}',
 
       // 健康度卡片（体检报告；只在有数据时渲染，失败不挡主流程）
-      '.dshmem-health{margin:12px 0 0;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1)}',
-      '.dshmem-healthWarn{border-color:color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, var(--dsw-alias-border-l2))}',
+      // 形态照官方 CodeCard / 设置行：底色用官方卡片色（bg-layer-1 是纯白，与页面同色＝等于没有卡片），
+      // 圆角与发丝线沿用既有规格；警示用官方 warn（amber），底纹沿用 Tag 的 10% color-mix 惯例。
+      '.dshmem-health{margin:12px 0 0;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-markdown-code-block)}',
+      '.dshmem-healthWarn{border-color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, var(--dsw-alias-markdown-code-block))}',
       '.dshmem-healthHead{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
       '.dshmem-healthHead b{font-weight:500;color:var(--dsw-alias-label-primary)}',
+      '.dshmem-healthWarn .dshmem-healthHead b:first-child{color:var(--dsw-alias-state-warn-label)}',
       '.dshmem-healthSub{margin-top:6px}',
-      '.dshmem-meter{margin-top:8px;height:4px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);overflow:hidden}',
+      '.dshmem-meter{margin-top:8px;height:4px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-border-l2);overflow:hidden}',
       '.dshmem-meterFill{display:block;height:100%;background:var(--dsw-alias-state-business-primary)}',
-      '.dshmem-meterFull{background:var(--dsw-alias-state-error-primary)}',
+      '.dshmem-meterFull{background:var(--dsw-alias-state-warn-primary)}',
       '.dshmem-healthList{margin-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
       '.dshmem-healthList summary{cursor:pointer}',
       '.dshmem-healthList ul{margin:6px 0 0;padding-left:18px}',
@@ -88,15 +91,15 @@ window.__ModuleLoader__.load({
       '.dshmem-editorTitle{font-size:16px;font-weight:500;line-height:24px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshmem-field{display:flex;flex-direction:column;gap:6px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
       '.dshmem-label{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
-      '.dshmem-input{box-sizing:border-box;width:100%;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px;outline:none}',
+      '.dshmem-input{box-sizing:border-box;width:100%;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px;outline:none}',
       '.dshmem-input:focus{border-color:var(--dsw-alias-state-business-primary)}',
       '.dshmem-input:disabled{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2)}',
-      '.dshmem-area{box-sizing:border-box;width:100%;min-height:240px;resize:vertical;padding:8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:19px;outline:none}',
+      '.dshmem-area{box-sizing:border-box;width:100%;min-height:240px;resize:vertical;padding:8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:19px;outline:none}',
       '.dshmem-area:focus{border-color:var(--dsw-alias-state-business-primary)}',
       '.dshmem-two{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}',
 
       // 提示条
-      '.dshmem-note{margin:14px 0 0;padding:8px 10px;border-radius:var(--dsw-radius-sm,6px);font-size:12px;line-height:18px}',
+      '.dshmem-note{margin:14px 0 0;padding:8px 10px;border-radius:var(--dsw-radius-sm,8px);font-size:12px;line-height:18px}',
       '.dshmem-noteErr{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)}',
       '.dshmem-noteOk{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent)}'
     ].join('\n')
