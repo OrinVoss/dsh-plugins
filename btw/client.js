@@ -697,7 +697,8 @@ window.__ModuleLoader__.load({
           // 中断时保留已生成的部分：它已经看得见，扔掉反而奇怪。
           if (answer.trim().length > 0) {
             const clean = sanitizeAnswer(answer).text
-            setItems((previous) => [...previous, { question, answer: clean }].slice(-THREAD_LIMIT))
+            // 思考内容一起留下，落定后思考行仍然在（默认折叠）
+            setItems((previous) => [...previous, { question, answer: clean, reasoning }].slice(-THREAD_LIMIT))
           }
           if (inputRef.current !== null) inputRef.current.focus()
         }

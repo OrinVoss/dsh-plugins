@@ -164,6 +164,8 @@ async function main() {
     const payload = JSON.parse(thread.frames.join(''))
     assert.equal(payload.items.length, 1)
     assert.equal(payload.items[0].answer, '答案是 42')
+    // 思考内容要留在快照里，否则面板在答案落定后就看不到思考行了
+    assert.equal(payload.items[0].reasoning, '先想一下')
 
     const clear = fakeResponse()
     routes.get('/btw-api/clear')(fakeRequest('POST', { sessionId: 's1' }), clear)

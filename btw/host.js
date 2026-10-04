@@ -279,7 +279,9 @@ module.exports = {
 
       if (failure !== undefined) send(res, { type: 'error', message: failure })
       if (answer.trim().length > 0) {
-        thread.push({ question, answer })
+        // 思考内容一并留在内存线程里：否则一轮结束、思考行就从面板里消失了。
+        // 重放给模型时只用 answer，不要把 reasoning 再喂回去。
+        thread.push({ question, answer, reasoning })
         trimThread(sessionId)
       }
       res.end()
