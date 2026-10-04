@@ -166,6 +166,10 @@ function analyze(options) {
     const wsName = key ? key.replace(/-[0-9a-f]{16}$/, '') : null
     const paths = Array.from(new Set(e.body.match(/[A-Za-z]:[\\/][^\s`"'）)，,；;]+/g) || []))
     if (isProject) {
+      // 项目库里的设计/决策子树天生就没有具体路径（讲的是取舍，不是环境），
+      // 对它们做"有没有路径"的启发式永远报 1 条假警报——直接跳过。
+      const sub = e.rel.split('/').slice(2, -1).join('/')
+      if (/^(decisions|design)(\/|$)/.test(sub)) continue
       const own = wsName ? paths.some((p) => p.includes(wsName)) : paths.length > 0
       if (!own && paths.length === 0) {
         boundary.push({ rel: e.rel, why: '项目条目里没有任何具体路径，可能换工作区也成立（该升全局）' })

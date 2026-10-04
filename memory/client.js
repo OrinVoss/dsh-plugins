@@ -63,6 +63,7 @@ window.__ModuleLoader__.load({
       '.dshmem-healthHead b{font-weight:500;color:var(--dsw-alias-label-primary)}',
       '.dshmem-healthWarn .dshmem-healthHead b:first-child{color:var(--dsw-alias-state-warn-label)}',
       '.dshmem-healthSub{margin-top:6px}',
+      '.dshmem-healthCmd{display:inline-flex;align-items:baseline;gap:4px;white-space:nowrap}',
       '.dshmem-meter{margin-top:8px;height:4px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-border-l2);overflow:hidden}',
       '.dshmem-meterFill{display:block;height:100%;background:var(--dsw-alias-state-business-primary)}',
       '.dshmem-meterFull{background:var(--dsw-alias-state-warn-primary)}',
@@ -180,12 +181,20 @@ window.__ModuleLoader__.load({
       return n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`
     }
 
+    // 与 DSH 其它地方一致：当天/昨天说人话，同年省年份，跨年才写全
     function fmtTime(iso) {
       if (!iso) return '–'
       const d = new Date(iso)
       if (Number.isNaN(d.getTime())) return '–'
       const p = (n) => String(n).padStart(2, '0')
-      return `${d.getMonth() + 1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+      const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
+      const now = new Date()
+      const day = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`
+      const yest = new Date(now.getTime() - 86400000)
+      if (day(d) === day(now)) return `今天 ${hm}`
+      if (day(d) === day(yest)) return `昨天 ${hm}`
+      const md = `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
+      return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}年${md}`
     }
 
     // ------------------------------------------------------------------ 组件
@@ -243,10 +252,12 @@ window.__ModuleLoader__.load({
           : null,
         h('div', { className: 'dshmem-healthHead dshmem-healthSub' },
           h('span', null, '维护：'),
-          h('span', { className: 'dshmem-mono' }, 'node ~/.dsh/plugins/memory/lintmemory.cjs'),
-          h('span', null, '（机械一致性，可判对错）'),
-          h('span', { className: 'dshmem-mono' }, 'node ~/.dsh/plugins/memory/memcheck.cjs'),
-          h('span', null, '（语义信号，只提示）')))
+          h('span', { className: 'dshmem-healthCmd' },
+            h('span', { className: 'dshmem-mono' }, 'node ~/.dsh/plugins/memory/lintmemory.cjs'),
+            h('span', null, '（机械一致性，可判对错）')),
+          h('span', { className: 'dshmem-healthCmd' },
+            h('span', { className: 'dshmem-mono' }, 'node ~/.dsh/plugins/memory/memcheck.cjs'),
+            h('span', null, '（语义信号，只提示）'))))
     }
 
     function MemorySection() {

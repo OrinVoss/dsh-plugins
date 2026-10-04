@@ -745,12 +745,13 @@ function createStore(options) {
           if (existing) existing.score += score
           else {
             const { meta } = parseEntry(text)
+            const known = indexEntries(text).find((x) => x.target === rel)
             candidates.set(rel, {
               score,
               entry: {
-                title: meta.name || rel.replace(/\.md$/, ''),
+                title: (known && known.title) || meta.name || rel.replace(/\.md$/, ''),
                 target: rel,
-                summary: meta.description || ''
+                summary: (known && known.summary) || meta.description || ''
               }
             })
           }
@@ -762,12 +763,16 @@ function createStore(options) {
       (a, b) => b.score - a.score || a.entry.target.localeCompare(b.entry.target)
     )
     const results = []
+    // 标题与摘要一律以索引为**唯一事实源**：正文回落命中的条目也可能已经有索引登记，
+    // 那里存的是人工维护的中文标题与摘要。meta.name 只在索引里确实没有它时兜底。
+    const indexed = new Map(idx.entries.map((e) => [e.target, e]))
     for (const hit of scored.slice(0, cap)) {
       const full = read(scope, hit.entry.target.replace(/\.md$/, ''), cwd)
+      const canon = indexed.get(hit.entry.target)
       results.push({
-        title: hit.entry.title,
+        title: (canon && canon.title) || hit.entry.title,
         target: hit.entry.target,
-        summary: hit.entry.summary,
+        summary: (canon && canon.summary) || hit.entry.summary,
         section: hit.entry.section,
         score: hit.score,
         body: full.found ? full.body : ''
