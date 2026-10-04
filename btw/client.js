@@ -132,7 +132,7 @@ window.__ModuleLoader__.load({
       '.dshbtw-input::placeholder{color:var(--dsw-alias-label-caption)}',
       '.dshbtw-row{display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0;padding:2px 8px 6px}',
       '.dshbtw-note{color:var(--dsw-alias-label-caption);font-size:var(--dsh-content-font-size-secondary,13px);line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.dshbtw-trailing{flex:none;display:flex;align-items:center;gap:8px}',
+      '.dshbtw-trailing{flex:none;display:flex;align-items:center;gap:8px;margin-left:auto}',
       '.dshbtw-ghost{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}',
       '.dshbtw-ghost:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
       '.dshbtw-ghost:disabled{opacity:.35;cursor:default}',
