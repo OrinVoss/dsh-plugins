@@ -82,8 +82,8 @@ window.__ModuleLoader__.load({
       '.dshbtw-empty{height:100%;display:flex;justify-content:center;align-items:center;color:var(--dsw-alias-label-caption);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(18px + var(--dsh-content-font-delta-secondary,0px))}',
       '.dshbtw-turn{margin-bottom:20px}',
       '.dshbtw-turn:last-child{margin-bottom:4px}',
-      '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end}',
-      '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 88%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
+      '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px}',
+      '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 82%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-answer{min-width:0;color:var(--dsw-alias-label-primary);font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px))}',
 
       // 思考行：照主会话 ReasoningRow 的规格——折叠高度 24px、标题 400 字重、
