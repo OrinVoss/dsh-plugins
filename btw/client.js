@@ -98,6 +98,11 @@ window.__ModuleLoader__.load({
       '.dshbtw-turn:last-child{margin-bottom:4px}',
       '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:12px}',
       '.dshbtw-userActions{display:flex;align-items:center;gap:8px;height:calc(28px + var(--dsh-content-font-delta,0px))}',
+      // 操作行的显形规则照主会话：
+      // - 回答行：`[data-actions-reveal=hover]` → 常态 opacity 0，hover / focus-within 才显形；
+      // - 用户行：对应 `:is([user]):has(~ [user]) .actions{opacity:0}` → 只有最后一条提问常显，
+      //   更早的提问行同样要 hover。用 opacity 而不是 display，保持 28px 占位不跳动（与官方一致）。
+      '@media (hover:hover){.dshbtw-turn .dshbtw-answerActions{opacity:0;transition:opacity 80ms}.dshbtw-turn:hover .dshbtw-answerActions,.dshbtw-turn:focus-within .dshbtw-answerActions{opacity:1}.dshbtw-turn:not([data-last="1"]) .dshbtw-userActions{opacity:0;transition:opacity 80ms}.dshbtw-turn:not([data-last="1"]):hover .dshbtw-userActions,.dshbtw-turn:not([data-last="1"]):focus-within .dshbtw-userActions{opacity:1}}',
       '.dshbtw-timeStart{font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);white-space:nowrap;padding-right:12px}',
       '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 82%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-answer{min-width:0}',
@@ -712,7 +717,7 @@ window.__ModuleLoader__.load({
                   total: interpolate(t('stats.count'), { count: formatTokens(total) }),
                 }))),
           clock === '' ? null : React.createElement('span', { className: 'dshbtw-time' }, clock))
-      return React.createElement('div', { className: 'dshbtw-actions' },
+      return React.createElement('div', { className: 'dshbtw-actions dshbtw-answerActions' },
         React.createElement('button', {
           className: 'dshbtw-action',
           type: 'button',
@@ -978,9 +983,13 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const turnOf = (item, key, streaming) => {
+      const turnOf = (item, key, streaming, isLast) => {
         const answer = sanitizeAnswer(item.answer, streaming === true)
-        return React.createElement('div', { className: 'dshbtw-turn', key },
+        return React.createElement('div', {
+          className: 'dshbtw-turn',
+          'data-last': isLast === true ? '1' : undefined,
+          key,
+        },
           React.createElement('div', { className: 'dshbtw-userRow' },
             React.createElement('div', { className: 'dshbtw-bubble' }, item.question),
             React.createElement(UserActions, {
@@ -1006,7 +1015,7 @@ window.__ModuleLoader__.load({
           reasoning: live.reasoning,
           stats: live.stats,
           askedAt: live.askedAt,
-        }, 'live')
+        }, 'live', false, true)
       const empty = items.length === 0 && live === null
         ? React.createElement('div', { className: 'dshbtw-empty' }, t('empty.hint'))
         : null
@@ -1014,7 +1023,7 @@ window.__ModuleLoader__.load({
       return React.createElement('div', { className: 'dshbtw-root' },
         React.createElement('div', { className: 'dshbtw-scroll', ref: scrollRef },
           empty,
-          items.map((item, index) => turnOf(item, index)),
+          items.map((item, index) => turnOf(item, index, false, live === null && index === items.length - 1)),
           streaming),
         error === null ? null : React.createElement('div', { className: 'dshbtw-error' }, error),
         React.createElement('div', { className: 'dshbtw-composer' },
