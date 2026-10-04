@@ -55,9 +55,11 @@ window.__ModuleLoader__.load({
       'action.copy': '复制',
       'action.copied': '已复制',
       'action.like': '点赞',
-      'action.liked': '已点赞',
-      'stats.tokens': '本次用量（输入/输出）',
-      'stats.cache': '缓存命中',
+      'action.dislike': '点踩',
+      'action.branch': '从这条回答分支（未实现）',
+      'stats.consumed': '用量 {total}',
+      'stats.count': '{count} tok',
+      'stats.usageTitle': '本轮用量',
       'think.title': '思考',
       'error.noSession': '请先打开一个会话',
     }
@@ -74,9 +76,11 @@ window.__ModuleLoader__.load({
       'action.copy': 'Copy',
       'action.copied': 'Copied',
       'action.like': 'Like',
-      'action.liked': 'Liked',
-      'stats.tokens': 'Tokens (in/out)',
-      'stats.cache': 'cache hit',
+      'action.dislike': 'Dislike',
+      'action.branch': 'Branch from this answer (not implemented)',
+      'stats.consumed': 'Usage {total}',
+      'stats.count': '{count} tok',
+      'stats.usageTitle': 'Turn usage',
       'think.title': 'Think',
       'error.noSession': 'Open a session first',
     }
@@ -97,17 +101,19 @@ window.__ModuleLoader__.load({
       // 回答下的操作行：照 primitives 的 MessageIconActions.module.css
       // （28px 方钮、15px 图标、gap 8、hover 底色）+ AssistantMarkdown 的
       // .actions{margin-top:16px;margin-left:-6px}，并按主会话那样 hover 才显形。
+      // 回答下的操作行：元素与顺序照主会话 turn tail——
+      // [复制][点赞][点踩][分支] + TurnUsagePanel 的「🛢 用量 X tok」+ 时间。
       '.dshbtw-actions{margin-top:16px;margin-left:-6px;min-height:calc(28px + var(--dsh-content-font-delta,0px));display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
       '.dshbtw-action{display:inline-flex;justify-content:center;align-items:center;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;border:0;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}',
       '.dshbtw-action svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
       '.dshbtw-action[data-on="1"]{color:var(--dsw-alias-state-business-primary)}',
 
-      // 时间 + 用量：照 MessageIconActions 的 .endInfo/.timeEnd 与 StatsPills 的 pill。
-      '.dshbtw-endInfo{display:inline-flex;align-items:center;gap:8px;margin-left:8px;min-width:0;color:var(--dsw-alias-label-tertiary);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
-      '.dshbtw-time{white-space:nowrap;font-variant-numeric:tabular-nums}',
-      '.dshbtw-pill{box-sizing:border-box;corner-shape:round;display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 8px;border:0;border-radius:999px;background:0 0;color:inherit;font:inherit;line-height:inherit;white-space:nowrap;font-variant-numeric:tabular-nums}',
-      '.dshbtw-pillSep{color:var(--dsw-alias-separator-primary);margin:0 6px;font:inherit}',
+      // 用量 pill：照 ui-chat 的 TurnUsagePanel.module.css 的 trigger/label。
+      '.dshbtw-usage{min-width:0;display:inline-flex;height:calc(28px + var(--dsh-content-font-delta,0px));align-items:center;gap:4px;padding:6px 8px;border:0;border-radius:var(--dsw-radius-sm,6px);background:0 0;color:var(--dsw-alias-label-tertiary);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(24px + var(--dsh-content-font-delta,0px));font-variant-numeric:tabular-nums;white-space:nowrap;cursor:default}',
+      '.dshbtw-usage svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px));flex:none}',
+      '.dshbtw-usageLabel{min-width:0;overflow:hidden;text-overflow:ellipsis}',
+      '.dshbtw-time{font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:inherit;white-space:nowrap;font-variant-numeric:tabular-nums}',
 
       // 思考行：逐条照 primitives 的 DisclosureRow.module.css 与 ui-chat 的
       // ReasoningRow.module.css——行高 24px+delta、标题 13/24、leading 是 16px 盒
@@ -287,6 +293,34 @@ window.__ModuleLoader__.load({
         fill: filled ? 'currentColor' : 'none',
         stroke: 'currentColor',
       }) })
+    }
+
+    /** 点踩（官方 outline 路径；填充态同路径换 fill）。 */
+    function IconDislike({ size = 16, filled = false }) {
+      return Icon({ size, children: React.createElement('path', {
+        d: 'M2.46302 8.06749L3.60171 3.34299C3.81822 2.44467 4.62196 1.81162 5.546 1.8116L6.64406 1.81158L8.56202 1.81158L10.8342 1.81158C12.4911 1.81158 13.8342 3.15473 13.8342 4.81158L13.8342 8.3018C13.8342 8.85408 13.3865 9.3018 12.8342 9.3018L11.9734 9.3018C10.1506 9.3018 8.61918 12.9014 8.32311 13.6427C8.28741 13.7321 8.26499 13.8247 8.22078 13.9102C8.13494 14.0763 7.91772 14.3127 7.40961 14.1107C5.67089 13.4196 6.76856 10.1478 7.03045 9.43789C7.05498 9.37141 7.00505 9.3018 6.93419 9.3018L3.43519 9.3018C2.78811 9.3018 2.31141 8.69656 2.46302 8.06749Z',
+        fill: filled ? 'currentColor' : 'none',
+        stroke: 'currentColor',
+      }) })
+    }
+
+    /** 分支（官方 IconBranchOutline 几何：两条曲线 + 两个端点圆）。 */
+    function IconBranch({ size = 16 }) {
+      return Icon({ size, children: React.createElement(React.Fragment, null,
+        React.createElement('path', { d: 'M1.01503 8.0001L5.6964 8.0001C6.41913 8.0001 6.78049 8.0001 7.12115 7.91951C7.4232 7.84804 7.71233 7.73014 7.97821 7.57C8.27809 7.38939 8.5364 7.13669 9.05303 6.63129L11.3281 4.40564', fill: 'none', stroke: 'currentColor' }),
+        React.createElement('path', { d: 'M1.01221 7.9999L5.6964 7.9999C6.41913 7.9999 6.78049 7.9999 7.12115 8.08049C7.4232 8.15196 7.71233 8.26986 7.97821 8.43C8.27809 8.61061 8.5364 8.86331 9.05303 9.36871L11.3281 11.5944', fill: 'none', stroke: 'currentColor' }),
+        React.createElement('circle', { cx: 12.4502, cy: 3.3079, r: 1.56962, fill: 'none', stroke: 'currentColor' }),
+        React.createElement('circle', { cx: 12.4502, cy: 12.6921, r: 1.56962, fill: 'none', stroke: 'currentColor' })) })
+    }
+
+    /** 数据库/用量（官方 IconDatabaseOutline 几何：四条弧）。 */
+    function IconDatabase({ size = 16 }) {
+      return Icon({ size, children: React.createElement(React.Fragment, null,
+        React.createElement('path', { d: 'M13.1967 5.1869C13.7232 4.77378 14.0003 4.30517 14.0001 3.82819C14.0003 3.3512 13.7232 2.88259 13.1967 2.46947C12.6702 2.05635 11.9128 1.71328 11.0006 1.47475C10.0885 1.23621 9.05371 1.11062 8.00039 1.1106C6.94707 1.11057 5.9123 1.23612 5.00009 1.47461C4.08742 1.71301 3.32948 2.05604 2.80249 2.46919C2.2755 2.88235 1.99805 3.35106 1.99805 3.82819C1.99805 4.30531 2.2755 4.77402 2.80249 5.18718C3.32948 5.60033 4.08742 5.94336 5.00009 6.18176C5.9123 6.42025 6.94707 6.5458 8.00039 6.54578C9.05371 6.54575 10.0885 6.42016 11.0006 6.18163C11.9128 5.94309 12.6702 5.60002 13.1967 5.1869Z', fill: 'none', stroke: 'currentColor' }),
+        React.createElement('path', { d: 'M2 3.80371V11.7848', fill: 'none', stroke: 'currentColor' }),
+        React.createElement('path', { d: 'M14 3.80371V11.7848', fill: 'none', stroke: 'currentColor' }),
+        React.createElement('path', { d: 'M2 7.81396C2 8.60524 2.63214 9.36411 3.75736 9.92363C4.88258 10.4832 6.4087 10.7975 8 10.7975C9.5913 10.7975 11.1174 10.4832 12.2426 9.92363C13.3679 9.36411 14 8.60524 14 7.81396', fill: 'none', stroke: 'currentColor' }),
+        React.createElement('path', { d: 'M2 11.7847C2 12.6081 2.63214 13.3977 3.75736 13.98C4.88258 14.5622 6.4087 14.8893 8 14.8893C9.5913 14.8893 11.1174 14.5622 12.2426 13.98C13.3679 13.3977 14 12.6081 14 11.7847', fill: 'none', stroke: 'currentColor' })) })
     }
 
     /** 展开/收起箭头（官方 chevron 路径，展开时用 CSS 旋转 180°）。 */
@@ -549,12 +583,28 @@ window.__ModuleLoader__.load({
     }
 
     /* @btw-stats:start */
-    /** 紧凑 token 数：1234 → 1.2k，1234567 → 1.23M。 */
+    /**
+     * 占位符插值：插件自己的 locale 座位是纯查表，不做 `{name}` 替换
+     * （主会话用的是框架的 `t(key, params)`），所以这里自己补一层。
+     */
+    function interpolate(text, params) {
+      let out = String(text)
+      for (const key of Object.keys(params || {})) {
+        out = out.split(`{${key}}`).join(String(params[key]))
+      }
+      return out
+    }
+
+    /**
+     * 紧凑 token 数，照 ui-chat 的 token-format.js：517 / 12.2K / 517K / 9.9M。
+     * 缩放值 ≥100 取整，否则保留一位小数；后缀走 locale（number.thousand/million）。
+     */
     function formatTokens(value) {
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '0'
-      if (value < 1000) return String(Math.round(value))
-      if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`
-      return `${(value / 1_000_000).toFixed(2)}M`
+      const scaled = (candidate) => (candidate >= 100 ? String(Math.round(candidate)) : String(Math.round(candidate * 10) / 10))
+      if (value < 1e3) return String(Math.round(value))
+      if (value < 1e6) return `${scaled(value / 1e3)}K`
+      return `${scaled(value / 1e6)}M`
     }
 
     /** 本地时钟 HH:MM。 */
@@ -564,35 +614,33 @@ window.__ModuleLoader__.load({
       return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
     }
 
-    /** 用时：<1s 给一位小数秒，<60s 给秒，更长给 m:ss。 */
-    function formatDuration(ms) {
-      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return ''
-      if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`
-      if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-      const total = Math.round(ms / 1000)
-      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
-    }
-
-    /** 缓存命中率（整数百分比）；分母为 0 或没有缓存信息时返回 undefined。 */
-    function cacheHitPercent(usage) {
+    /** 本轮总用量：优先 totalTokens，否则把各桶加总。 */
+    function totalTokens(usage) {
       if (usage === undefined || usage === null) return undefined
-      const read = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0
-      const written = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0
-      const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0
-      const total = input + read + written
-      if (read <= 0 || total <= 0) return undefined
-      return Math.round((read / total) * 100)
+      if (typeof usage.totalTokens === 'number') return usage.totalTokens
+      const parts = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens']
+      let sum = 0
+      let seen = false
+      for (const key of parts) {
+        if (typeof usage[key] === 'number') {
+          sum += usage[key]
+          seen = true
+        }
+      }
+      return seen ? sum : undefined
     }
     /* @btw-stats:end */
 
     /**
-     * 回答下的操作行：复制 + 点赞，右侧是时间与用量。
-     * 点赞是**本地假状态**（只切换图标，不提交任何反馈、不写任何存储）——面板里的回答
-     * 不是会话消息，没有可挂靠的反馈对象。
+     * 回答下的操作行，元素与顺序照主会话 turn tail：
+     * [复制][点赞][点踩][分支] + 「🛢 用量 X tok」+ 时间。
+     *
+     * 点赞/点踩是**本地假状态**（互斥、只切换图标；面板里的回答不是会话消息，
+     * 没有可挂靠的反馈对象），分支是占位按钮（真做需要分叉会话，未实现）。
      */
     function AnswerActions(props) {
       const [copied, setCopied] = React.useState(false)
-      const [liked, setLiked] = React.useState(false)
+      const [vote, setVote] = React.useState(0)
       const t = props.t
       const stats = props.stats
       const copy = () => {
@@ -603,27 +651,17 @@ window.__ModuleLoader__.load({
           setTimeout(() => setCopied(false), 1500)
         }, () => { /* clipboard denial needs no UI: the button just does nothing */ })
       }
-      const parts = []
-      if (stats !== undefined && stats !== null) {
-        const clock = formatClock(stats.endedAt)
-        const duration = formatDuration(stats.endedAt - stats.startedAt)
-        const usage = stats.usage
-        if (clock !== '') parts.push(React.createElement('span', { className: 'dshbtw-time', key: 'time' }, clock))
-        if (usage !== undefined && usage !== null) {
-          parts.push(React.createElement('span', { className: 'dshbtw-pill', key: 'tokens', title: t('stats.tokens') },
-            `↑${formatTokens(usage.inputTokens)} ↓${formatTokens(usage.outputTokens)}`))
-          const percent = cacheHitPercent(usage)
-          if (percent !== undefined) {
-            parts.push(React.createElement('span', { className: 'dshbtw-pillSep', key: 'sep', 'aria-hidden': true }, '·'))
-            parts.push(React.createElement('span', { className: 'dshbtw-pill', key: 'cache', title: t('stats.cache') },
-              `${t('stats.cache')} ${percent}%`))
-          }
-        }
-        if (duration !== '') {
-          parts.push(React.createElement('span', { className: 'dshbtw-pillSep', key: 'sep2', 'aria-hidden': true }, '·'))
-          parts.push(React.createElement('span', { className: 'dshbtw-pill', key: 'took' }, duration))
-        }
-      }
+      const voteButton = (kind, icon) => React.createElement('button', {
+        className: 'dshbtw-action',
+        type: 'button',
+        'data-on': vote === kind ? '1' : undefined,
+        'aria-pressed': vote === kind,
+        title: t(kind === 1 ? 'action.like' : 'action.dislike'),
+        'aria-label': t(kind === 1 ? 'action.like' : 'action.dislike'),
+        onClick: () => setVote((value) => (value === kind ? 0 : kind)),
+      }, icon)
+      const total = stats === undefined || stats === null ? undefined : totalTokens(stats.usage)
+      const clock = stats === undefined || stats === null ? '' : formatClock(stats.endedAt)
       return React.createElement('div', { className: 'dshbtw-actions' },
         React.createElement('button', {
           className: 'dshbtw-action',
@@ -632,16 +670,23 @@ window.__ModuleLoader__.load({
           'aria-label': copied ? t('action.copied') : t('action.copy'),
           onClick: copy,
         }, copied ? React.createElement(IconCheck, { size: 15 }) : React.createElement(IconCopy, { size: 15 })),
+        voteButton(1, React.createElement(IconLike, { size: 15, filled: vote === 1 })),
+        voteButton(-1, React.createElement(IconDislike, { size: 15, filled: vote === -1 })),
         React.createElement('button', {
           className: 'dshbtw-action',
           type: 'button',
-          'data-on': liked ? '1' : undefined,
-          'aria-pressed': liked,
-          title: liked ? t('action.liked') : t('action.like'),
-          'aria-label': liked ? t('action.liked') : t('action.like'),
-          onClick: () => setLiked((value) => !value),
-        }, React.createElement(IconLike, { size: 15, filled: liked })),
-        parts.length === 0 ? null : React.createElement('span', { className: 'dshbtw-endInfo' }, parts))
+          title: t('action.branch'),
+          'aria-label': t('action.branch'),
+        }, React.createElement(IconBranch, { size: 15 })),
+        total === undefined
+          ? null
+          : React.createElement('span', { className: 'dshbtw-usage', title: t('stats.usageTitle') },
+            React.createElement(IconDatabase, { size: 15 }),
+            React.createElement('span', { className: 'dshbtw-usageLabel' },
+              interpolate(t('stats.consumed'), {
+                total: interpolate(t('stats.count'), { count: formatTokens(total) }),
+              }))),
+        clock === '' ? null : React.createElement('span', { className: 'dshbtw-time' }, clock))
     }
 
     /** Markdown 块 → React 节点。语义标签 + `.dshbtw-md` 的后代规则，样式与官方同一套值。 */
@@ -754,12 +799,26 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { ensureCss() }, [])
 
       // 宿主内存里的线程才是真相：重挂载后从这里恢复。
+      // 快照里的用量/时间是平铺字段（usage/startedAt/endedAt），实时流里是 stats 包装，
+      // 这里统一成 stats，否则重挂载后那行用量+时间会消失。
       React.useEffect(() => {
         if (sessionId === undefined) return
         let cancelled = false
         fetch('/btw-api/thread?sessionId=' + encodeURIComponent(sessionId), { cache: 'no-store' })
           .then((res) => (res.ok ? res.json() : { items: [] }))
-          .then((data) => { if (!cancelled && data && Array.isArray(data.items)) setItems(data.items) })
+          .then((data) => {
+            if (cancelled || data === null || data === undefined || !Array.isArray(data.items)) return
+            setItems(data.items.map((item) => ({
+              question: item.question,
+              answer: item.answer,
+              reasoning: item.reasoning,
+              stats: item.stats !== undefined
+                ? item.stats
+                : (item.usage === undefined && item.startedAt === undefined
+                  ? undefined
+                  : { usage: item.usage, startedAt: item.startedAt, endedAt: item.endedAt }),
+            })))
+          })
           .catch(() => { /* an empty thread is a fine fallback */ })
         return () => { cancelled = true }
       }, [sessionId])

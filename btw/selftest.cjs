@@ -398,24 +398,28 @@ async function main() {
     const end = source.indexOf(endMarker)
     assert.ok(start >= 0 && end > start, 'client.js must keep the stats markers')
     const stats = new Function(source.slice(start + startMarker.length, end)
-      + '\n; return { formatTokens, formatClock, formatDuration, cacheHitPercent }')()
+      + '\n; return { formatTokens, formatClock, totalTokens, interpolate }')()
 
+    // 占位符插值（插件 locale 座位是纯查表，必须自己替换）
+    assert.equal(stats.interpolate('用量 {total}', { total: '9.9M' }), '用量 9.9M')
+    assert.equal(stats.interpolate('{count} tok', { count: '12.2K' }), '12.2K tok')
+    assert.equal(stats.interpolate('无占位符', {}), '无占位符')
+
+    // 照 ui-chat 的 token-format.js：517 / 12.2K / 517K / 9.9M
     assert.equal(stats.formatTokens(0), '0')
+    assert.equal(stats.formatTokens(517), '517')
     assert.equal(stats.formatTokens(999), '999')
-    assert.equal(stats.formatTokens(1234), '1.2k')
-    assert.equal(stats.formatTokens(12345), '12k')
-    assert.equal(stats.formatTokens(1234567), '1.23M')
-
-    assert.equal(stats.formatDuration(400), '0.4s')
-    assert.equal(stats.formatDuration(4500), '5s')
-    assert.equal(stats.formatDuration(65_000), '1:05')
+    assert.equal(stats.formatTokens(12200), '12.2K')
+    assert.equal(stats.formatTokens(517000), '517K')
+    assert.equal(stats.formatTokens(9900000), '9.9M')
+    assert.equal(stats.formatTokens(undefined), '0')
 
     assert.equal(stats.formatClock(Date.now()).length, 5)
     assert.equal(stats.formatClock(undefined), '')
 
-    assert.equal(stats.cacheHitPercent({ inputTokens: 0, outputTokens: 0 }), undefined)
-    assert.equal(stats.cacheHitPercent({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 300 }), 75)
-    assert.equal(stats.cacheHitPercent(undefined), undefined)
+    assert.equal(stats.totalTokens(undefined), undefined)
+    assert.equal(stats.totalTokens({ totalTokens: 420 }), 420)
+    assert.equal(stats.totalTokens({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 300 }), 420)
   }
 
   console.log('selftest: all checks passed')

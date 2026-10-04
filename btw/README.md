@@ -39,10 +39,11 @@
 | --- | --- |
 | 用户提问 | 主会话同款气泡：`--dsw-specific-bubble` + `--dsw-radius-xl` + `10px 16px`、右对齐、`max-width: min(--dsh-chat-content-width*.702, 88%)` |
 | 思考 | 折叠行，规格照主会话 `ReasoningRow`：高度 `24px + font-delta`、标题「思考」+ 官方轨道字形、`2px` 圆点分隔符、次要字号摘要、流式时右侧渐隐 + 微光；点一下展开全文（`chevron` 旋转 180°） |
-| 回答 | 轻量 Markdown：围栏代码（语言标签 + 复制）、行内代码、粗斜体、有序/无序列表、标题、引用；配色走 `--dsw-alias-markdown-*` |
+| 回答 | 轻量 Markdown：围栏代码（语言标签 + 复制）、行内代码、粗斜体、有序/无序列表、标题、引用；间距/字号/字重逐条照 primitives 的 `markdown/MarkdownText.module.css`（body 变体 + compact 变体），代码卡照 `markdown/CodeBlock.module.css` |
+| 回答下的操作行 | 元素与顺序照主会话 turn tail：`[复制][点赞][点踩][分支]` + `TurnUsagePanel` 的「🛢 用量 X tok」+ 时间。28px 方钮、15px 图标、`gap: 8px`、`margin-top: 16px`、`margin-left: -6px` 照 `MessageIconActions.module.css`；用量 pill 照 `TurnUsagePanel.module.css`（`gap: 4px`、`padding: 6px 8px`、`font-size: secondary - 1px`、tabular-nums）；token 格式化照 ui-chat 的 `token-format.js`（`517 / 12.2K / 517K / 9.9M`）。**点赞/点踩是本地假状态（互斥，只换图标），分支是未实现的占位按钮** |
 | 输入区 | 复刻主 composer：`--dsw-specific-input-major` + `--dsw-radius-panel` + `--dsw-elevation-soft`，同款 34px 圆形主按钮（发送/停止） |
 | 字号 | 跟随设置里的内容字号（`--dsh-content-font-size` / `--dsh-content-font-delta`），不写死 px |
-| 图标 | 内联官方 primitives 的路径数据（发送/停止/清空/复制/勾/思考/箭头） |
+| 图标 | 内联官方 primitives 的路径数据（发送/停止/清空/复制/勾/思考/箭头/点赞/点踩/分支/数据库） |
 
 ## 位置
 
