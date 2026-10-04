@@ -224,7 +224,7 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `autoAgentsSync` | `true` | 是否在每次写入/删除后同步索引区块（关掉可省去同会话的重复重注入，见 §11 的成本一节） |
 | `syncOnStartup` | `true` | 插件加载时先同步一次 |
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
-| `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则截断并给出指向完整索引的提示；本 profile 的 bundle patch 设为 `20480` |
+| `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
 
 ## 6. 从 Z code 导入已有记忆
 
@@ -236,7 +236,7 @@ node import.cjs --from "C:\Users\17040\.zcode\global-memory" --to "$env:USERPROF
 node import.cjs --from "C:\Users\17040\.zcode\global-memory" --to "$env:USERPROFILE\.dsh\memory"
 ```
 
-实测：43 个条目、8 个分组，索引区块约 7.7 KB（远低于 20 KB 预算，也远低于 `dsh-agent-instructions` 的 64 KB 预算）。
+实测：**条目会一直长**——2026-10-04 已到 68 条全局条目 / 8 个分组，索引区块约 20.3 KB，把当时的 20480 字节预算顶满（区块末尾出现「索引超预算，此处省略 N 条」）。`maxBlockBytes` 因此提到 **32768**；`dsh-agent-instructions` 那边还有 64 KB 的指令预算兜底。条目继续增长时优先精简摘要，其次再提预算。
 
 ## 7. 自检
 
@@ -245,7 +245,7 @@ cd dsh-memory
 node selfcheck.cjs    # 43 项：文件格式、索引增删改（含折行续行、空分组清理、同 target 去重与 repairIndex）、切词/多词检索、项目键寻址、AGENTS.md 托管区块幂等与预算、CRLF 条目解析
 node plugintest.cjs   # 40 项：mock ctx 下的工具注册形状、execute/render 接线、作用域、错误路径、/memory-api/* 全部路由与参数校验
 node clienttest.cjs   #  9 项：客户端 bundle 形状、settings.section 注册参数、样式只走主题 token 且不重复外壳留白、沿用宿主控件规格、首次渲染、只请求 /memory-api/*
-node lintmemory.cjs   #  9 项：校验**真实记忆库**的字段约定与索引一致性（见下）
+node lintmemory.cjs   # 13 项：校验**真实记忆库**的字段约定、摘要一致性、双链与注入预算（见下）
 node reindex.cjs      # 一次性修复：合并索引里同一 target 的重复登记（--dry-run 预演）
 node import.cjs --from <源> --to <目标> --dry-run   # 导入预演
 ```
@@ -253,13 +253,17 @@ node import.cjs --from <源> --to <目标> --dry-run   # 导入预演
 也可以 `pnpm test` / `npm test`（= 上面四项顺序执行）。
 
 `lintmemory.cjs` 是 2026-10-01 补的**真实库** lint——`selfcheck.cjs` 只测临时目录里的纯文件逻辑，
-管不到"仓库里那 50 多条到底写得对不对"。它按 INDEX.md 的字段约定检查：
+管不到"库里那几十条到底写得对不对"。它按 INDEX.md 的字段约定检查：
 
 - frontmatter 齐备（`node_type` / `name` / `description`），`name` 与文件名一致；
 - `scope` 显式且与位置一致（全局库根 = `global`，`projects/<键>/` = `project`）；
 - `type` 合法，且 `project` 只用于 `projects/` 或 `study/` 白名单；
 - 索引不重复登记同一条目、不指向不存在的文件，条目也不会成为孤儿；
-- 行尾统一为 LF（不允许 CRLF）、每个条目都有 `updatedAt`。
+- 行尾统一为 LF（不允许 CRLF）、每个条目都有 `updatedAt`；
+- `description` 不许折行（插件按行解析，续行会被静默吞掉）；
+- 索引摘要必须与 frontmatter `description` 一致（同一事实只留一套摘要）；
+- 正文 `[[…]]` 必须命中某个条目的 `name`；
+- `~/.dsh/AGENTS.md` 托管区块没被预算截断、且余量 > 10%。
 
 首次运行就抓到两个真问题：**`parseEntry` 在 CRLF frontmatter 上会丢最后一行元数据**
 （`head` 末尾残留 `\r`，正则的 `$` 匹配不上；本库 20 个 CRLF 条目里 8 条正好把 `scope` 写在最后一行，
@@ -345,7 +349,7 @@ node reindex.cjs             # 真改（自动备份靠 git / 你自己的工作
 |---|---|
 | `plugin_manager list_plugins` | `include:memory` / `dsh-memory` → `fiberPhase: active` |
 | 导入 Z code 记忆 | 43 条、8 个分组，落到 `~/.dsh/memory` |
-| `~/.dsh/AGENTS.md` 托管区块 | 生成成功，区块约 11 KB（预算 20 KB，指令预算 64 KB） |
+| `~/.dsh/AGENTS.md` 托管区块 | 生成成功，2026-10-04 实测 20.3 KB / 68 条（预算 32768 字节，指令预算 64 KB） |
 | 注入生效 | `dsh-agent-instructions` 在会话中途就检测到该文件变化并重新注入（肉眼可见） |
 | `memory_search` | 命中 6 条、按作用域分组、返回完整正文 |
 | `memory_write`（global） | 落盘 + frontmatter + 索引 + 区块同步，一次调用全做完 |
@@ -436,12 +440,12 @@ node reindex.cjs             # 真改（自动备份靠 git / 你自己的工作
 | | 量 |
 |---|---|
 | 整份 `~/.dsh/AGENTS.md`（新会话注入一次） | **11.3 KB / 7 457 字 / 59 行**，约 **2 500–3 000 tokens** |
-| 其中托管区块（45 条索引） | 11.3 KB |
+| 其中托管区块（68 条索引） | 20.3 KB |
 | 其中区块外（用户自己的内容） | 47 字节 |
 | 项目级 `AGENTS.md` 链 | 0（本工作区根目录没有） |
-| 占 `maxBytes` 指令预算 | 17.2% |
-| 全库总量 | 127 KB（正文 ≈4.5 万–5.9 万 tokens） |
-| **索引 / 全库比例** | **8.9%** —— 这是这套设计最值钱的地方：库可以长到几百 KB，进上下文的只有目录 |
+| 占 `maxBytes` 指令预算 | 31.7% |
+| 全库总量 | 263.9 KB / 72 条（正文 token 数随内容增长） |
+| **索引 / 全库比例** | **7.7%** —— 这是这套设计最值钱的地方：库可以长到几百 KB，进上下文的只有目录 |
 
 **变更会重复注入**：`dsh-agent-instructions` 在 `changedSectionText()` 里对「文件已改变」发的是
 **整份 `file.content`**，不是 diff、也不是摘要：

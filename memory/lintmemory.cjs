@@ -11,6 +11,8 @@
 //   scope  global = 全局库根条目；project = projects/<name>-<hash>/ 下的条目
 //   type   reference | feedback | workflow | fact | project
 //          project 只允许「本身就是长期计划/项目」的条目：projects/ 下，或 study/ 白名单
+//   2026-10-04 补：description 不许折行；索引摘要必须与 frontmatter description 一致（两套摘要合一）；
+//                   正文 [[…]] 必须命中某个条目的 name；AGENTS.md 托管区块不许被预算截断
 
 const fs = require('node:fs')
 const os = require('node:os')
@@ -72,9 +74,10 @@ const indexes = indexFiles.map((p) => {
   const r = rel(p)
   const isProject = r.startsWith(store.PROJECTS_DIR + '/')
   const base = isProject ? path.dirname(p) : home
+  const parsed = store.parseIndex(fs.readFileSync(p, 'utf8'))
   const listed = []
-  for (const s of store.parseIndex(fs.readFileSync(p, 'utf8')).sections) for (const e of s.entries) listed.push(e.target)
-  return { p, r, isProject, base, listed }
+  for (const s of parsed.sections) for (const e of s.entries) listed.push(e.target)
+  return { p, r, isProject, base, listed, sections: parsed.sections }
 })
 
 console.log(`（${entries.length} 个条目 / ${indexes.length} 个索引文件）\n`)
@@ -161,6 +164,72 @@ check('行尾统一为 LF（不允许 CRLF）', () => {
 check('每个条目都有 updatedAt', () => {
   const bad = entries.filter((e) => !e.meta.updatedAt).map((e) => e.r)
   if (bad.length) throw new Error(`缺 updatedAt：\n  ${bad.join('\n  ')}`)
+})
+
+check('frontmatter 的 description 不折行（插件按行解析，续行会被静默吞掉）', () => {
+  const bad = []
+  for (const e of entries) {
+    const lines = fs.readFileSync(e.p, 'utf8').split(/\r?\n/)
+    const di = lines.findIndex((l, i) => i > 0 && /^description:/.test(l))
+    if (di === -1) continue
+    const end = lines.findIndex((l, i) => i > di && l.trim() === '---')
+    if (end !== -1 && di + 1 < end && /^\s+\S/.test(lines[di + 1])) bad.push(e.r)
+  }
+  if (bad.length) throw new Error(`description 折行：\n  ${bad.join('\n  ')}`)
+})
+
+check('索引摘要与 frontmatter description 一致（同一事实不许有两套摘要）', () => {
+  const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim()
+  const bad = []
+  for (const idx of indexes) {
+    for (const s of idx.sections) {
+      for (const e of s.entries) {
+        const abs = path.join(idx.base, e.target)
+        if (!fs.existsSync(abs)) continue
+        const meta = store.parseEntry(fs.readFileSync(abs, 'utf8')).meta
+        if (norm(meta.description) !== norm(e.summary)) {
+          bad.push(`${idx.r} → ${e.target}\n      索引: ${e.summary}\n      正文: ${meta.description}`)
+        }
+      }
+    }
+  }
+  if (bad.length) throw new Error(`摘要漂移（把两处改成同一句）：\n  ${bad.join('\n  ')}`)
+})
+
+check('正文双链 [[…]] 都命中某个条目的 name', () => {
+  const names = new Set(entries.map((e) => e.meta.name).filter(Boolean))
+  const bad = []
+  for (const e of entries) {
+    for (const m of fs.readFileSync(e.p, 'utf8').matchAll(/\[\[([^\]\n]+)\]\]/g)) {
+      const x = m[1].trim()
+      if (x === '双链' || names.has(x)) continue
+      bad.push(`${e.r} → [[${x}]]`)
+    }
+  }
+  if (bad.length) throw new Error(`双链对不上：\n  ${bad.join('\n  ')}`)
+})
+
+check('AGENTS.md 托管区块没被预算截断（且余量 > 10%）', () => {
+  const agents = path.join(path.dirname(home), 'AGENTS.md')
+  if (!fs.existsSync(agents)) return
+  const t = fs.readFileSync(agents, 'utf8')
+  const b = t.indexOf(store.BLOCK_BEGIN)
+  const e2 = t.indexOf(store.BLOCK_END)
+  if (b === -1 || e2 === -1) return
+  const block = t.slice(b, e2 + store.BLOCK_END.length)
+  if (/索引超预算/.test(block)) {
+    throw new Error('托管区块已被截断（区块里出现「索引超预算」提示）——提高 maxBlockBytes 或精简条目摘要')
+  }
+  let budget = 32768
+  const cfg = path.join(__dirname, 'cordis.patch.yml')
+  if (fs.existsSync(cfg)) {
+    const m = /maxBlockBytes:\s*(\d+)/.exec(fs.readFileSync(cfg, 'utf8'))
+    if (m) budget = Number(m[1])
+  }
+  const bytes = Buffer.byteLength(block, 'utf8')
+  const pct = (bytes / budget) * 100
+  if (pct > 90) throw new Error(`托管区块 ${bytes}/${budget} 字节（${pct.toFixed(0)}%，>90%）——再加一条就会开始从末尾截断`)
+  process.stdout.write(`        （区块 ${bytes}/${budget} 字节，用掉 ${pct.toFixed(0)}%）\n`)
 })
 
 console.log(`\n${passed} 项通过，${failures.length} 项失败。\n`)

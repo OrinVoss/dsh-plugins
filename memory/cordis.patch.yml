@@ -10,7 +10,7 @@
     - id: memory
       name: dsh-memory
       config:
-        maxBlockBytes: 20480
+        maxBlockBytes: 32768
         autoAgentsSync: true
         settingsPage: true
         syncOnStartup: true
