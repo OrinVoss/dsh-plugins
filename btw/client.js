@@ -54,6 +54,8 @@ window.__ModuleLoader__.load({
       'action.clear.title': '清空本次临时提问',
       'action.copy': '复制',
       'action.copied': '已复制',
+      'action.like': '点赞',
+      'action.liked': '已点赞',
       'think.title': '思考',
       'error.noSession': '请先打开一个会话',
     }
@@ -69,6 +71,8 @@ window.__ModuleLoader__.load({
       'action.clear.title': 'Clear this aside thread',
       'action.copy': 'Copy',
       'action.copied': 'Copied',
+      'action.like': 'Like',
+      'action.liked': 'Liked',
       'think.title': 'Think',
       'error.noSession': 'Open a session first',
     }
@@ -85,6 +89,16 @@ window.__ModuleLoader__.load({
       '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px}',
       '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 82%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-answer{min-width:0}',
+
+      // 回答下的操作行：照 primitives 的 MessageIconActions.module.css
+      // （28px 方钮、15px 图标、gap 8、hover 底色）+ AssistantMarkdown 的
+      // .actions{margin-top:16px;margin-left:-6px}，并按主会话那样 hover 才显形。
+      '.dshbtw-actions{margin-top:16px;margin-left:-6px;height:calc(28px + var(--dsh-content-font-delta,0px));display:flex;align-items:center;gap:8px}',
+      '.dshbtw-action{display:inline-flex;justify-content:center;align-items:center;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;border:0;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}',
+      '.dshbtw-action svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px))}',
+      '.dshbtw-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
+      '.dshbtw-action[data-on="1"]{color:var(--dsw-alias-state-business-primary)}',
+      '@media (hover:hover){.dshbtw-turn .dshbtw-actions{opacity:0;transition:opacity 80ms}.dshbtw-turn:hover .dshbtw-actions,.dshbtw-turn:focus-within .dshbtw-actions{opacity:1}}',
 
       // 思考行：逐条照 primitives 的 DisclosureRow.module.css 与 ui-chat 的
       // ReasoningRow.module.css——行高 24px+delta、标题 13/24、leading 是 16px 盒
@@ -255,6 +269,15 @@ window.__ModuleLoader__.load({
           fill: 'currentColor',
         }),
       ] })
+    }
+
+    /** 点赞/取消赞（官方 outline/fill 同一路径，填充态只换 fill/stroke）。 */
+    function IconLike({ size = 16, filled = false }) {
+      return Icon({ size, children: React.createElement('path', {
+        d: 'M13.537 8.12098L12.3983 12.8455C12.1818 13.7438 11.378 14.3769 10.454 14.3769L9.35595 14.3769H7.43799H5.16577C3.50892 14.3769 2.16577 13.0337 2.16577 11.3769V7.88668C2.16577 7.33439 2.61349 6.88668 3.16577 6.88668H4.02665C5.84943 6.88668 7.38083 3.28711 7.67689 2.54578C7.71259 2.45639 7.73501 2.36373 7.77922 2.27824C7.86506 2.11221 8.08228 1.87578 8.59039 2.07775C10.3291 2.76886 9.23144 6.04071 8.96955 6.75058C8.94502 6.81707 8.99495 6.88668 9.06581 6.88668H12.5648C13.2119 6.88668 13.6886 7.49192 13.537 8.12098Z',
+        fill: filled ? 'currentColor' : 'none',
+        stroke: 'currentColor',
+      }) })
     }
 
     /** 展开/收起箭头（官方 chevron 路径，展开时用 CSS 旋转 180°）。 */
@@ -516,6 +539,42 @@ window.__ModuleLoader__.load({
         React.createElement('pre', { className: 'dshbtw-codePre' }, props.text))
     }
 
+    /**
+     * 回答下的操作行：复制 + 点赞。
+     * 点赞是**本地假状态**（只切换图标，不提交任何反馈、不写任何存储）——面板里的回答
+     * 不是会话消息，没有可挂靠的反馈对象。
+     */
+    function AnswerActions(props) {
+      const [copied, setCopied] = React.useState(false)
+      const [liked, setLiked] = React.useState(false)
+      const t = props.t
+      const copy = () => {
+        const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+        if (clipboard === undefined || typeof clipboard.writeText !== 'function') return
+        clipboard.writeText(props.text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        }, () => { /* clipboard denial needs no UI: the button just does nothing */ })
+      }
+      return React.createElement('div', { className: 'dshbtw-actions' },
+        React.createElement('button', {
+          className: 'dshbtw-action',
+          type: 'button',
+          title: copied ? t('action.copied') : t('action.copy'),
+          'aria-label': copied ? t('action.copied') : t('action.copy'),
+          onClick: copy,
+        }, copied ? React.createElement(IconCheck, { size: 15 }) : React.createElement(IconCopy, { size: 15 })),
+        React.createElement('button', {
+          className: 'dshbtw-action',
+          type: 'button',
+          'data-on': liked ? '1' : undefined,
+          'aria-pressed': liked,
+          title: liked ? t('action.liked') : t('action.like'),
+          'aria-label': liked ? t('action.liked') : t('action.like'),
+          onClick: () => setLiked((value) => !value),
+        }, React.createElement(IconLike, { size: 15, filled: liked })))
+    }
+
     /** Markdown 块 → React 节点。语义标签 + `.dshbtw-md` 的后代规则，样式与官方同一套值。 */
     function renderBlocks(blocks, t) {
       return blocks.map((block, index) => {
@@ -759,7 +818,9 @@ window.__ModuleLoader__.load({
             : React.createElement(ReasoningRow, { text: item.reasoning, running: streaming === true, t }),
           answer.text === ''
             ? null
-            : React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)))
+            : React.createElement(React.Fragment, null,
+              React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)),
+              React.createElement(AnswerActions, { text: answer.text, t })))
       }
 
       const streaming = live === null
