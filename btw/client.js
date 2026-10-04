@@ -48,14 +48,12 @@ window.__ModuleLoader__.load({
       'guide.description': '不写入历史的旁支提问',
       'empty.hint': '问点关于这个会话的事。',
       'composer.placeholder': '临时提问…',
-      'composer.note': '不写入会话历史',
       'action.send': '发送',
       'action.stop': '停止',
       'action.clear': '清空',
       'action.clear.title': '清空本次临时提问',
       'action.copy': '复制',
       'action.copied': '已复制',
-      'answer.noTools': '旁支提问没有工具，上面的工具调用没有被执行。',
       'think.title': '思考',
       'error.noSession': '请先打开一个会话',
     }
@@ -65,14 +63,12 @@ window.__ModuleLoader__.load({
       'guide.description': 'Side question, kept out of history',
       'empty.hint': 'Ask something about this conversation.',
       'composer.placeholder': 'Ask aside…',
-      'composer.note': 'Kept out of history',
       'action.send': 'Send',
       'action.stop': 'Stop',
       'action.clear': 'Clear',
       'action.clear.title': 'Clear this aside thread',
       'action.copy': 'Copy',
       'action.copied': 'Copied',
-      'answer.noTools': 'Side questions have no tools, so the tool calls above were not executed.',
       'think.title': 'Think',
       'error.noSession': 'Open a session first',
     }
@@ -95,7 +91,7 @@ window.__ModuleLoader__.load({
       '.dshbtw-think{display:flex;flex-direction:column;margin-bottom:6px}',
       '.dshbtw-think:not([data-expanded]){height:calc(24px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-thinkRow{display:flex;align-items:center;box-sizing:border-box;width:100%;height:100%;padding:0 8px 0 2px;border:0;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));text-align:left;cursor:pointer;overflow:hidden}',
-      '.dshbtw-thinkRow:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
+      '.dshbtw-thinkRow:hover{color:var(--dsw-alias-label-secondary)}',
       '.dshbtw-thinkLeading{flex:none;display:inline-flex;align-items:center;gap:2px}',
       '.dshbtw-thinkChevron{display:inline-flex;transition:transform .12s}',
       '.dshbtw-think[data-expanded] .dshbtw-thinkChevron{transform:rotate(180deg)}',
@@ -123,7 +119,6 @@ window.__ModuleLoader__.load({
       '.dshbtw-quote{margin:0 0 10px;padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}',
       '.dshbtw-inlineCode{padding:1px 5px;border-radius:var(--dsw-radius-sm,6px);background:var(--dsw-alias-markdown-inline-code);font-family:' + MONO + ';font-size:.92em}',
       '.dshbtw-link{color:var(--dsw-alias-link)}',
-      '.dshbtw-toolNote{margin-top:6px;color:var(--dsw-alias-label-caption);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(18px + var(--dsh-content-font-delta-secondary,0px))}',
       '.dshbtw-code{margin:0 0 10px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-markdown-code-block);overflow:hidden}',
       '.dshbtw-code:last-child{margin-bottom:0}',
       '.dshbtw-codeHead{display:flex;align-items:center;gap:8px;padding:2px 6px 2px 12px;background:var(--dsw-alias-markdown-code-block-banner);color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
@@ -738,10 +733,7 @@ window.__ModuleLoader__.load({
             : React.createElement(ReasoningRow, { text: item.reasoning, running: streaming === true, t }),
           answer.text === ''
             ? null
-            : React.createElement('div', { className: 'dshbtw-answer' }, renderBlocks(parseMarkdown(answer.text), t)),
-          answer.stripped
-            ? React.createElement('div', { className: 'dshbtw-toolNote' }, t('answer.noTools'))
-            : null)
+            : React.createElement('div', { className: 'dshbtw-answer' }, renderBlocks(parseMarkdown(answer.text), t)))
       }
 
       const streaming = live === null
@@ -770,8 +762,9 @@ window.__ModuleLoader__.load({
               onKeyDown,
             }),
             React.createElement('div', { className: 'dshbtw-row' },
-              React.createElement('span', { className: 'dshbtw-note' },
-                sessionId === undefined ? t('error.noSession') : t('composer.note')),
+              sessionId === undefined
+                ? React.createElement('span', { className: 'dshbtw-note' }, t('error.noSession'))
+                : null,
               React.createElement('span', { className: 'dshbtw-trailing' },
                 busy ? React.createElement('span', { className: 'dshbtw-spin' }) : null,
                 React.createElement('button', {
