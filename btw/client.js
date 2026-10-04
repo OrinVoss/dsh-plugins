@@ -139,7 +139,6 @@ window.__ModuleLoader__.load({
       '.dshbtw-primary{display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:0;border-radius:999px;corner-shape:round;background:var(--dsw-alias-button-info-fill);color:#fff;cursor:pointer;transition:background-color .1s}',
       '.dshbtw-primary:hover:not(:disabled){background:var(--dsw-alias-button-info-hover)}',
       '.dshbtw-primary:disabled{opacity:.4;cursor:default}',
-      '.dshbtw-primary[data-stop="1"]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
       '.dshbtw-spin{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-business-primary);animation:dshbtw-pulse 1s ease-in-out infinite alternate}',
       '@keyframes dshbtw-pulse{0%{opacity:.35}to{opacity:1}}',
     ].join('')
@@ -177,10 +176,10 @@ window.__ModuleLoader__.load({
       ] })
     }
 
+    /** 停止字形：与主 composer 完全一致——16×16 里 10×10、rx 3 的当前色圆角方块。 */
     function IconStop({ size = 16 }) {
-      return Icon({ size, children: React.createElement('path', {
-        d: 'M12.5 2.5H3.5C2.94772 2.5 2.5 2.94772 2.5 3.5V12.5C2.5 13.0523 2.94772 13.5 3.5 13.5H12.5C13.0523 13.5 13.5 13.0523 13.5 12.5V3.5C13.5 2.94772 13.0523 2.5 12.5 2.5Z',
-        fill: 'currentColor',
+      return Icon({ size, children: React.createElement('rect', {
+        x: '3', y: '3', width: '10', height: '10', rx: '3', fill: 'currentColor',
       }) })
     }
 
