@@ -301,7 +301,9 @@ module.exports = {
       const thread = threadOf(sessionId)
       let answer = ''
       let reasoning = ''
+      let usage
       let failure
+      const startedAt = Date.now()
       try {
         const messages = buildMessages(agent.session, thread, question)
         const stream = ctx.llm.stream({
@@ -318,6 +320,8 @@ module.exports = {
           } else if (chunk.type === 'reasoning-delta') {
             reasoning += chunk.text
             send(res, { type: 'reasoning', text: chunk.text })
+          } else if (chunk.type === 'usage') {
+            usage = chunk.usage
           } else if (chunk.type === 'finish') {
             const reason = chunk.reason || {}
             if (reason.kind === 'error' || reason.kind === 'aborted') {
@@ -331,12 +335,16 @@ module.exports = {
       } finally {
         inflight.delete(sessionId)
       }
+      const endedAt = Date.now()
+
+      // 用量与起止时间一并回给客户端：面板那行"时间 + 用量"与主会话 turn tail 同一口径。
+      send(res, { type: 'usage', usage, startedAt, endedAt })
 
       if (failure !== undefined) send(res, { type: 'error', message: failure })
       if (answer.trim().length > 0) {
-        // 思考内容一并留在内存线程里：否则一轮结束、思考行就从面板里消失了。
+        // 思考/用量一并留在内存线程里：否则一轮结束、思考行与用量行就从面板里消失了。
         // 重放给模型时只用 answer，不要把 reasoning 再喂回去。
-        thread.push({ question, answer, reasoning })
+        thread.push({ question, answer, reasoning, usage, startedAt, endedAt })
         trimThread(sessionId)
       }
       res.end()

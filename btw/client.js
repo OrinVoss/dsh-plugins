@@ -56,6 +56,8 @@ window.__ModuleLoader__.load({
       'action.copied': '已复制',
       'action.like': '点赞',
       'action.liked': '已点赞',
+      'stats.tokens': '本次用量（输入/输出）',
+      'stats.cache': '缓存命中',
       'think.title': '思考',
       'error.noSession': '请先打开一个会话',
     }
@@ -73,6 +75,8 @@ window.__ModuleLoader__.load({
       'action.copied': 'Copied',
       'action.like': 'Like',
       'action.liked': 'Liked',
+      'stats.tokens': 'Tokens (in/out)',
+      'stats.cache': 'cache hit',
       'think.title': 'Think',
       'error.noSession': 'Open a session first',
     }
@@ -93,12 +97,17 @@ window.__ModuleLoader__.load({
       // 回答下的操作行：照 primitives 的 MessageIconActions.module.css
       // （28px 方钮、15px 图标、gap 8、hover 底色）+ AssistantMarkdown 的
       // .actions{margin-top:16px;margin-left:-6px}，并按主会话那样 hover 才显形。
-      '.dshbtw-actions{margin-top:16px;margin-left:-6px;height:calc(28px + var(--dsh-content-font-delta,0px));display:flex;align-items:center;gap:8px}',
+      '.dshbtw-actions{margin-top:16px;margin-left:-6px;min-height:calc(28px + var(--dsh-content-font-delta,0px));display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
       '.dshbtw-action{display:inline-flex;justify-content:center;align-items:center;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;border:0;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}',
       '.dshbtw-action svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
       '.dshbtw-action[data-on="1"]{color:var(--dsw-alias-state-business-primary)}',
-      '@media (hover:hover){.dshbtw-turn .dshbtw-actions{opacity:0;transition:opacity 80ms}.dshbtw-turn:hover .dshbtw-actions,.dshbtw-turn:focus-within .dshbtw-actions{opacity:1}}',
+
+      // 时间 + 用量：照 MessageIconActions 的 .endInfo/.timeEnd 与 StatsPills 的 pill。
+      '.dshbtw-endInfo{display:inline-flex;align-items:center;gap:8px;margin-left:8px;min-width:0;color:var(--dsw-alias-label-tertiary);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
+      '.dshbtw-time{white-space:nowrap;font-variant-numeric:tabular-nums}',
+      '.dshbtw-pill{box-sizing:border-box;corner-shape:round;display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 8px;border:0;border-radius:999px;background:0 0;color:inherit;font:inherit;line-height:inherit;white-space:nowrap;font-variant-numeric:tabular-nums}',
+      '.dshbtw-pillSep{color:var(--dsw-alias-separator-primary);margin:0 6px;font:inherit}',
 
       // 思考行：逐条照 primitives 的 DisclosureRow.module.css 与 ui-chat 的
       // ReasoningRow.module.css——行高 24px+delta、标题 13/24、leading 是 16px 盒
@@ -539,8 +548,45 @@ window.__ModuleLoader__.load({
         React.createElement('pre', { className: 'dshbtw-codePre' }, props.text))
     }
 
+    /* @btw-stats:start */
+    /** 紧凑 token 数：1234 → 1.2k，1234567 → 1.23M。 */
+    function formatTokens(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '0'
+      if (value < 1000) return String(Math.round(value))
+      if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`
+      return `${(value / 1_000_000).toFixed(2)}M`
+    }
+
+    /** 本地时钟 HH:MM。 */
+    function formatClock(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) return ''
+      const date = new Date(ms)
+      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    }
+
+    /** 用时：<1s 给一位小数秒，<60s 给秒，更长给 m:ss。 */
+    function formatDuration(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return ''
+      if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`
+      if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+      const total = Math.round(ms / 1000)
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+    }
+
+    /** 缓存命中率（整数百分比）；分母为 0 或没有缓存信息时返回 undefined。 */
+    function cacheHitPercent(usage) {
+      if (usage === undefined || usage === null) return undefined
+      const read = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0
+      const written = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0
+      const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0
+      const total = input + read + written
+      if (read <= 0 || total <= 0) return undefined
+      return Math.round((read / total) * 100)
+    }
+    /* @btw-stats:end */
+
     /**
-     * 回答下的操作行：复制 + 点赞。
+     * 回答下的操作行：复制 + 点赞，右侧是时间与用量。
      * 点赞是**本地假状态**（只切换图标，不提交任何反馈、不写任何存储）——面板里的回答
      * 不是会话消息，没有可挂靠的反馈对象。
      */
@@ -548,6 +594,7 @@ window.__ModuleLoader__.load({
       const [copied, setCopied] = React.useState(false)
       const [liked, setLiked] = React.useState(false)
       const t = props.t
+      const stats = props.stats
       const copy = () => {
         const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
         if (clipboard === undefined || typeof clipboard.writeText !== 'function') return
@@ -555,6 +602,27 @@ window.__ModuleLoader__.load({
           setCopied(true)
           setTimeout(() => setCopied(false), 1500)
         }, () => { /* clipboard denial needs no UI: the button just does nothing */ })
+      }
+      const parts = []
+      if (stats !== undefined && stats !== null) {
+        const clock = formatClock(stats.endedAt)
+        const duration = formatDuration(stats.endedAt - stats.startedAt)
+        const usage = stats.usage
+        if (clock !== '') parts.push(React.createElement('span', { className: 'dshbtw-time', key: 'time' }, clock))
+        if (usage !== undefined && usage !== null) {
+          parts.push(React.createElement('span', { className: 'dshbtw-pill', key: 'tokens', title: t('stats.tokens') },
+            `↑${formatTokens(usage.inputTokens)} ↓${formatTokens(usage.outputTokens)}`))
+          const percent = cacheHitPercent(usage)
+          if (percent !== undefined) {
+            parts.push(React.createElement('span', { className: 'dshbtw-pillSep', key: 'sep', 'aria-hidden': true }, '·'))
+            parts.push(React.createElement('span', { className: 'dshbtw-pill', key: 'cache', title: t('stats.cache') },
+              `${t('stats.cache')} ${percent}%`))
+          }
+        }
+        if (duration !== '') {
+          parts.push(React.createElement('span', { className: 'dshbtw-pillSep', key: 'sep2', 'aria-hidden': true }, '·'))
+          parts.push(React.createElement('span', { className: 'dshbtw-pill', key: 'took' }, duration))
+        }
       }
       return React.createElement('div', { className: 'dshbtw-actions' },
         React.createElement('button', {
@@ -572,7 +640,8 @@ window.__ModuleLoader__.load({
           title: liked ? t('action.liked') : t('action.like'),
           'aria-label': liked ? t('action.liked') : t('action.like'),
           onClick: () => setLiked((value) => !value),
-        }, React.createElement(IconLike, { size: 15, filled: liked })))
+        }, React.createElement(IconLike, { size: 15, filled: liked })),
+        parts.length === 0 ? null : React.createElement('span', { className: 'dshbtw-endInfo' }, parts))
     }
 
     /** Markdown 块 → React 节点。语义标签 + `.dshbtw-md` 的后代规则，样式与官方同一套值。 */
@@ -724,6 +793,7 @@ window.__ModuleLoader__.load({
         let answer = ''
         let reasoning = ''
         let failure
+        let stats = null
         try {
           const res = await fetch('/btw-api/ask', {
             method: 'POST',
@@ -760,6 +830,9 @@ window.__ModuleLoader__.load({
                 } else if (event !== undefined && event.type === 'reasoning') {
                   reasoning += event.text
                   setLive({ question, text: answer, reasoning })
+                } else if (event !== undefined && event.type === 'usage') {
+                  stats = { usage: event.usage, startedAt: event.startedAt, endedAt: event.endedAt }
+                  setLive({ question, text: answer, reasoning, stats })
                 } else if (event !== undefined && event.type === 'error') {
                   failure = event.message
                 }
@@ -777,8 +850,8 @@ window.__ModuleLoader__.load({
           // 中断时保留已生成的部分：它已经看得见，扔掉反而奇怪。
           if (answer.trim().length > 0) {
             const clean = sanitizeAnswer(answer).text
-            // 思考内容一起留下，落定后思考行仍然在（默认折叠）
-            setItems((previous) => [...previous, { question, answer: clean, reasoning }].slice(-THREAD_LIMIT))
+            // 思考/用量一起留下，落定后思考行与用量行仍然在
+            setItems((previous) => [...previous, { question, answer: clean, reasoning, stats }].slice(-THREAD_LIMIT))
           }
           if (inputRef.current !== null) inputRef.current.focus()
         }
@@ -820,7 +893,7 @@ window.__ModuleLoader__.load({
             ? null
             : React.createElement(React.Fragment, null,
               React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)),
-              React.createElement(AnswerActions, { text: answer.text, t })))
+              React.createElement(AnswerActions, { text: answer.text, stats: item.stats, t })))
       }
 
       const streaming = live === null

@@ -40,6 +40,7 @@ function harness(options = {}) {
         yield { type: 'reasoning-delta', index: 0, text: '先想一下' }
         yield { type: 'text-delta', index: 0, text: '答案是' }
         yield { type: 'text-delta', index: 0, text: ' 42' }
+        yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 300, totalTokens: 420 } }
         yield { type: 'finish', reason: { kind: 'stop' } }
       },
     },
@@ -121,6 +122,12 @@ async function main() {
     assert.deepEqual(events.filter((e) => e.type === 'delta').map((e) => e.text), ['答案是', ' 42'])
     assert.deepEqual(events.filter((e) => e.type === 'reasoning').map((e) => e.text), ['先想一下'])
     assert.equal(events.filter((e) => e.type === 'finish').length, 1)
+    // 用量与起止时间要一起回给客户端（面板那行"时间 + 用量"）
+    const usageFrame = events.find((e) => e.type === 'usage')
+    assert.ok(usageFrame !== undefined, 'usage frame is sent')
+    assert.equal(usageFrame.usage.inputTokens, 100)
+    assert.equal(usageFrame.usage.cacheReadTokens, 300)
+    assert.ok(usageFrame.endedAt >= usageFrame.startedAt, 'start/end timestamps are ordered')
 
     // 请求组装：一条 user 消息（<conversation> + <question>）+ 系统引导词；不带 tools
     assert.equal(calls.length, 1)
@@ -179,6 +186,9 @@ async function main() {
     assert.equal(payload.items[0].answer, '答案是 42')
     // 思考内容要留在快照里，否则面板在答案落定后就看不到思考行了
     assert.equal(payload.items[0].reasoning, '先想一下')
+    // 用量与时间同样要留在快照里（重挂载后面板那行还在）
+    assert.equal(payload.items[0].usage.inputTokens, 100)
+    assert.ok(payload.items[0].endedAt >= payload.items[0].startedAt)
 
     const clear = fakeResponse()
     routes.get('/btw-api/clear')(fakeRequest('POST', { sessionId: 's1' }), clear)
@@ -375,6 +385,37 @@ async function main() {
     assert.equal(reasoningSummary('第一段\n\n第二段首行\n\n', true), '第二段首行')
     // 只有一段且还在写：仍给它的首行，不至于空白
     assert.equal(reasoningSummary('唯一一段的首行', true), '唯一一段的首行')
+  }
+
+  // 9. 用量/时间格式化（纯函数，从标记区间取出）
+  {
+    const fs = require('node:fs')
+    const path = require('node:path')
+    const source = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
+    const startMarker = '/* @btw-stats:start */'
+    const endMarker = '/* @btw-stats:end */'
+    const start = source.indexOf(startMarker)
+    const end = source.indexOf(endMarker)
+    assert.ok(start >= 0 && end > start, 'client.js must keep the stats markers')
+    const stats = new Function(source.slice(start + startMarker.length, end)
+      + '\n; return { formatTokens, formatClock, formatDuration, cacheHitPercent }')()
+
+    assert.equal(stats.formatTokens(0), '0')
+    assert.equal(stats.formatTokens(999), '999')
+    assert.equal(stats.formatTokens(1234), '1.2k')
+    assert.equal(stats.formatTokens(12345), '12k')
+    assert.equal(stats.formatTokens(1234567), '1.23M')
+
+    assert.equal(stats.formatDuration(400), '0.4s')
+    assert.equal(stats.formatDuration(4500), '5s')
+    assert.equal(stats.formatDuration(65_000), '1:05')
+
+    assert.equal(stats.formatClock(Date.now()).length, 5)
+    assert.equal(stats.formatClock(undefined), '')
+
+    assert.equal(stats.cacheHitPercent({ inputTokens: 0, outputTokens: 0 }), undefined)
+    assert.equal(stats.cacheHitPercent({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 300 }), 75)
+    assert.equal(stats.cacheHitPercent(undefined), undefined)
   }
 
   console.log('selftest: all checks passed')
