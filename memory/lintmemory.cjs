@@ -228,6 +228,7 @@ check('索引标题是给人读的，不许直接是文件名（中英混排的�
   }
 })
 
+
 check('AGENTS.md 托管区块没被预算截断（且余量 > 10%）', () => {
   const agents = path.join(path.dirname(home), 'AGENTS.md')
   if (!fs.existsSync(agents)) return

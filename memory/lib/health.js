@@ -179,6 +179,29 @@ function analyze(options) {
     }
   }
 
+  // 「正文里提到的文件路径现在还在不在」——**只作参考，不算待办**。
+  // 为什么只做参考：本机受限 shell 下这个判定根本不可靠（2026-10-04 实测 15 条报告全是假阳性）：
+  //   ① 路径里有空格（Program Files / Sandy ONE），拿 \s 当分隔符会把路径腰斩
+  //   ② WindowsApps 下的 MSIX app execution alias、部分系统目录，fs.existsSync 本来就 false
+  //   ③ 正文里常有人类占位符（C:\Users\<user>\...\Temp），不是真路径
+  // 因此：只查**带已知扩展名的"文件"路径**（目录一律不查），带占位符的整条丢弃，最多列 12 条。
+  const FILE_EXT = /\.(exe|dll|py|pyc|md|json|jsonl|yml|yaml|toml|txt|log|zip|7z|gguf|bat|ps1|cmd|cjs|mjs|js|ts|css|html|png|jpg|jpeg|mp4|wav|pdf|dmp|bak|lock|snap)$/i
+  const TOKEN_RE = /[A-Za-z]:\\[^\n`"*<>|]*?\.[A-Za-z0-9]{1,8}(?=[\s`"'）)，,；;]|$)/g
+  const stalePaths = []
+  for (const e of entries) {
+    const seen = new Set()
+    for (const m of e.body.matchAll(TOKEN_RE)) {
+      const p = m[0].replace(/[.。，,；;]+$/, '').trim()
+      if (p.length < 8 || seen.has(p)) continue
+      seen.add(p)
+      if (!FILE_EXT.test(p)) continue
+      if (/<|>|\.\.\.|…/.test(p)) continue
+      if (/^[A-Za-z]:\\Users\\[^\\]+\\AppData\\Local\\Microsoft\\WindowsApps\\/i.test(p)) continue
+      try { if (fs.existsSync(p)) continue } catch (_) { continue }
+      stalePaths.push({ rel: e.rel, path: p })
+    }
+  }
+
   const byType = {}
   for (const e of entries) byType[e.meta.type || '(缺)'] = (byType[e.meta.type || '(缺)'] || 0) + 1
   const globalCount = entries.filter((e) => !e.rel.startsWith(store.PROJECTS_DIR + '/')).length
@@ -199,7 +222,8 @@ function analyze(options) {
     noLinks: { count: noLinks.length, entries: noLinks.slice(0, limit) },
     mergeCandidates: { threshold, count: pairs.length, pairs: pairs.slice(0, limit) },
     boundarySuspects: boundary.slice(0, limit),
-    workspaceHeavy: workspaceHeavy.sort((a, b) => b.paths - a.paths).slice(0, limit)
+    workspaceHeavy: workspaceHeavy.sort((a, b) => b.paths - a.paths).slice(0, limit),
+    stalePaths: stalePaths.slice(0, limit)
   }
 }
 
@@ -220,3 +244,4 @@ function verdict(report) {
 }
 
 module.exports = { analyze, verdict, signature, containment, DEFAULT_STALE_DAYS, DEFAULT_LIMIT, DEFAULT_THRESHOLD }
+

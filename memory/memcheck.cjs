@@ -67,6 +67,12 @@ if (flags.has('--json')) {
   console.log(`\n  作用域待确认：${report.boundarySuspects.length} 条`)
   for (const b of report.boundarySuspects) console.log(`    ${b.rel} —— ${b.why}`)
 
+  if (report.stalePaths && report.stalePaths.length) {
+    console.log('\n  参考（不算待办）：正文提到的文件路径在本机已测不到——多半是路径写错、已移动，' +
+      '或是沙箱看不见的 MSIX/别名；用之前自己验一下')
+    for (const s of report.stalePaths) console.log(`    ${s.rel} → ${s.path}`)
+  }
+
   if (report.workspaceHeavy.length) {
     console.log('\n  参考（不算待办）：含工作区专有路径最多的几条，确认它们本来就该是全局条')
     for (const w of report.workspaceHeavy) console.log(`    ${w.rel}（${w.paths} 处路径）`)
