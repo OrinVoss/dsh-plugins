@@ -414,8 +414,13 @@ async function main() {
     assert.equal(stats.formatTokens(9900000), '9.9M')
     assert.equal(stats.formatTokens(undefined), '0')
 
-    assert.equal(stats.formatClock(Date.now()).length, 5)
-    assert.equal(stats.formatClock(undefined), '')
+    // 照 ui-chat 的 formatMessageClock：今天 HH:MM / 同年给 clock.md / 跨年给 clock.ymd
+    const clockSeat = (key) => ({ 'clock.md': '{m}月{d}日', 'clock.ymd': '{y}年{m}月{d}日' }[key] ?? key)
+    const now = new Date(2026, 4, 10, 15, 0).getTime()
+    assert.equal(stats.formatClock(undefined, now, clockSeat), '')
+    assert.equal(stats.formatClock(new Date(2026, 4, 10, 9, 5).getTime(), now, clockSeat), '09:05')
+    assert.equal(stats.formatClock(new Date(2026, 0, 2, 7, 8).getTime(), now, clockSeat), '1月2日 07:08')
+    assert.equal(stats.formatClock(new Date(2025, 11, 31, 23, 59).getTime(), now, clockSeat), '2025年12月31日 23:59')
 
     assert.equal(stats.totalTokens(undefined), undefined)
     assert.equal(stats.totalTokens({ totalTokens: 420 }), 420)

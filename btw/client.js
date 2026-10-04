@@ -56,7 +56,8 @@ window.__ModuleLoader__.load({
       'action.copied': '已复制',
       'action.like': '点赞',
       'action.dislike': '点踩',
-      'action.branch': '从这条回答分支（未实现）',
+      'clock.md': '{m}月{d}日',
+      'clock.ymd': '{y}年{m}月{d}日',
       'stats.consumed': '用量 {total}',
       'stats.count': '{count} tok',
       'stats.usageTitle': '本轮用量',
@@ -77,7 +78,8 @@ window.__ModuleLoader__.load({
       'action.copied': 'Copied',
       'action.like': 'Like',
       'action.dislike': 'Dislike',
-      'action.branch': 'Branch from this answer (not implemented)',
+      'clock.md': '{m}/{d}',
+      'clock.ymd': '{y}-{m}-{d}',
       'stats.consumed': 'Usage {total}',
       'stats.count': '{count} tok',
       'stats.usageTitle': 'Turn usage',
@@ -94,7 +96,9 @@ window.__ModuleLoader__.load({
       '.dshbtw-empty{height:100%;display:flex;justify-content:center;align-items:center;color:var(--dsw-alias-label-caption);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(18px + var(--dsh-content-font-delta-secondary,0px))}',
       '.dshbtw-turn{margin-bottom:20px}',
       '.dshbtw-turn:last-child{margin-bottom:4px}',
-      '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px}',
+      '.dshbtw-userRow{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:12px}',
+      '.dshbtw-userActions{display:flex;align-items:center;gap:8px;height:calc(28px + var(--dsh-content-font-delta,0px))}',
+      '.dshbtw-timeStart{font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);white-space:nowrap;padding-right:12px}',
       '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 82%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-answer{min-width:0}',
 
@@ -109,8 +113,11 @@ window.__ModuleLoader__.load({
       '.dshbtw-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
       '.dshbtw-action[data-on="1"]{color:var(--dsw-alias-state-business-primary)}',
 
-      // 用量 pill：照 ui-chat 的 TurnUsagePanel.module.css 的 trigger/label。
-      '.dshbtw-usage{min-width:0;display:inline-flex;height:calc(28px + var(--dsh-content-font-delta,0px));align-items:center;gap:4px;padding:6px 8px;border:0;border-radius:var(--dsw-radius-sm,6px);background:0 0;color:var(--dsw-alias-label-tertiary);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(24px + var(--dsh-content-font-delta,0px));font-variant-numeric:tabular-nums;white-space:nowrap;cursor:default}',
+      // 用量 + 时间：照 MessageIconActions 的结构——`.endInfo` 包住 usageAction 与 clockEl，
+      // `.endInfo{color: tertiary; gap: 8px; margin-left: 8px}`、时间用 `.timeEnd`
+      // （font-size: secondary - 1px、line-height: 24px + delta、color: inherit）。
+      '.dshbtw-endInfo{display:inline-flex;align-items:center;gap:8px;margin-left:8px;min-width:0;color:var(--dsw-alias-label-tertiary)}',
+      '.dshbtw-usage{min-width:0;display:inline-flex;height:calc(28px + var(--dsh-content-font-delta,0px));align-items:center;gap:4px;padding:6px 8px;border:0;border-radius:var(--dsw-radius-sm,6px);background:0 0;color:inherit;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(24px + var(--dsh-content-font-delta,0px));font-variant-numeric:tabular-nums;white-space:nowrap;cursor:default}',
       '.dshbtw-usage svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px));flex:none}',
       '.dshbtw-usageLabel{min-width:0;overflow:hidden;text-overflow:ellipsis}',
       '.dshbtw-time{font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:inherit;white-space:nowrap;font-variant-numeric:tabular-nums}',
@@ -302,15 +309,6 @@ window.__ModuleLoader__.load({
         fill: filled ? 'currentColor' : 'none',
         stroke: 'currentColor',
       }) })
-    }
-
-    /** 分支（官方 IconBranchOutline 几何：两条曲线 + 两个端点圆）。 */
-    function IconBranch({ size = 16 }) {
-      return Icon({ size, children: React.createElement(React.Fragment, null,
-        React.createElement('path', { d: 'M1.01503 8.0001L5.6964 8.0001C6.41913 8.0001 6.78049 8.0001 7.12115 7.91951C7.4232 7.84804 7.71233 7.73014 7.97821 7.57C8.27809 7.38939 8.5364 7.13669 9.05303 6.63129L11.3281 4.40564', fill: 'none', stroke: 'currentColor' }),
-        React.createElement('path', { d: 'M1.01221 7.9999L5.6964 7.9999C6.41913 7.9999 6.78049 7.9999 7.12115 8.08049C7.4232 8.15196 7.71233 8.26986 7.97821 8.43C8.27809 8.61061 8.5364 8.86331 9.05303 9.36871L11.3281 11.5944', fill: 'none', stroke: 'currentColor' }),
-        React.createElement('circle', { cx: 12.4502, cy: 3.3079, r: 1.56962, fill: 'none', stroke: 'currentColor' }),
-        React.createElement('circle', { cx: 12.4502, cy: 12.6921, r: 1.56962, fill: 'none', stroke: 'currentColor' })) })
     }
 
     /** 数据库/用量（官方 IconDatabaseOutline 几何：四条弧）。 */
@@ -607,11 +605,23 @@ window.__ModuleLoader__.load({
       return `${scaled(value / 1e6)}M`
     }
 
-    /** 本地时钟 HH:MM。 */
-    function formatClock(ms) {
+    /**
+     * 时间文案，照 ui-chat 的 formatMessageClock：今天只给 `HH:MM`；
+     * 同年更早给 `clock.md` 模板 + 时间；跨年给 `clock.ymd` 模板 + 时间。
+     */
+    function formatClock(ms, now, t) {
       if (typeof ms !== 'number' || !Number.isFinite(ms)) return ''
       const date = new Date(ms)
-      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+      const reference = new Date(typeof now === 'number' ? now : Date.now())
+      const pad2 = (value) => String(value).padStart(2, '0')
+      const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+      const sameDay = date.getFullYear() === reference.getFullYear()
+        && date.getMonth() === reference.getMonth()
+        && date.getDate() === reference.getDate()
+      if (sameDay) return clock
+      const params = { y: date.getFullYear(), m: date.getMonth() + 1, d: date.getDate() }
+      const template = date.getFullYear() === reference.getFullYear() ? t('clock.md') : t('clock.ymd')
+      return `${interpolate(template, params)} ${clock}`
     }
 
     /** 本轮总用量：优先 totalTokens，否则把各桶加总。 */
@@ -632,11 +642,39 @@ window.__ModuleLoader__.load({
     /* @btw-stats:end */
 
     /**
+     * 用户提问下的操作行，照主会话 `clock === 'start'` 的形态：时间在左
+     * （`.timeStart`：secondary 字号、tertiary、`padding-right: 12px`），复制在右；
+     * 整行靠右（父级 `.dshbtw-userRow` 的 align-items: flex-end）。
+     */
+    function UserActions(props) {
+      const [copied, setCopied] = React.useState(false)
+      const t = props.t
+      const copy = () => {
+        const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+        if (clipboard === undefined || typeof clipboard.writeText !== 'function') return
+        clipboard.writeText(props.text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        }, () => { /* clipboard denial needs no UI: the button just does nothing */ })
+      }
+      const clock = formatClock(props.at, undefined, t)
+      return React.createElement('div', { className: 'dshbtw-userActions', 'data-clock': 'start' },
+        clock === '' ? null : React.createElement('span', { className: 'dshbtw-timeStart' }, clock),
+        React.createElement('button', {
+          className: 'dshbtw-action',
+          type: 'button',
+          title: copied ? t('action.copied') : t('action.copy'),
+          'aria-label': copied ? t('action.copied') : t('action.copy'),
+          onClick: copy,
+        }, copied ? React.createElement(IconCheck, { size: 15 }) : React.createElement(IconCopy, { size: 15 })))
+    }
+
+    /**
      * 回答下的操作行，元素与顺序照主会话 turn tail：
-     * [复制][点赞][点踩][分支] + 「🛢 用量 X tok」+ 时间。
+     * [复制][点赞][点踩] + `.endInfo`（「🛢 用量 X tok」+ 时间）。
      *
      * 点赞/点踩是**本地假状态**（互斥、只切换图标；面板里的回答不是会话消息，
-     * 没有可挂靠的反馈对象），分支是占位按钮（真做需要分叉会话，未实现）。
+     * 没有可挂靠的反馈对象）。
      */
     function AnswerActions(props) {
       const [copied, setCopied] = React.useState(false)
@@ -661,7 +699,19 @@ window.__ModuleLoader__.load({
         onClick: () => setVote((value) => (value === kind ? 0 : kind)),
       }, icon)
       const total = stats === undefined || stats === null ? undefined : totalTokens(stats.usage)
-      const clock = stats === undefined || stats === null ? '' : formatClock(stats.endedAt)
+      const clock = stats === undefined || stats === null ? '' : formatClock(stats.endedAt, undefined, t)
+      const endInfo = total === undefined && clock === ''
+        ? null
+        : React.createElement('span', { className: 'dshbtw-endInfo' },
+          total === undefined
+            ? null
+            : React.createElement('span', { className: 'dshbtw-usage', title: t('stats.usageTitle') },
+              React.createElement(IconDatabase, { size: 15 }),
+              React.createElement('span', { className: 'dshbtw-usageLabel' },
+                interpolate(t('stats.consumed'), {
+                  total: interpolate(t('stats.count'), { count: formatTokens(total) }),
+                }))),
+          clock === '' ? null : React.createElement('span', { className: 'dshbtw-time' }, clock))
       return React.createElement('div', { className: 'dshbtw-actions' },
         React.createElement('button', {
           className: 'dshbtw-action',
@@ -672,21 +722,7 @@ window.__ModuleLoader__.load({
         }, copied ? React.createElement(IconCheck, { size: 15 }) : React.createElement(IconCopy, { size: 15 })),
         voteButton(1, React.createElement(IconLike, { size: 15, filled: vote === 1 })),
         voteButton(-1, React.createElement(IconDislike, { size: 15, filled: vote === -1 })),
-        React.createElement('button', {
-          className: 'dshbtw-action',
-          type: 'button',
-          title: t('action.branch'),
-          'aria-label': t('action.branch'),
-        }, React.createElement(IconBranch, { size: 15 })),
-        total === undefined
-          ? null
-          : React.createElement('span', { className: 'dshbtw-usage', title: t('stats.usageTitle') },
-            React.createElement(IconDatabase, { size: 15 }),
-            React.createElement('span', { className: 'dshbtw-usageLabel' },
-              interpolate(t('stats.consumed'), {
-                total: interpolate(t('stats.count'), { count: formatTokens(total) }),
-              }))),
-        clock === '' ? null : React.createElement('span', { className: 'dshbtw-time' }, clock))
+        endInfo)
     }
 
     /** Markdown 块 → React 节点。语义标签 + `.dshbtw-md` 的后代规则，样式与官方同一套值。 */
@@ -808,16 +844,17 @@ window.__ModuleLoader__.load({
           .then((res) => (res.ok ? res.json() : { items: [] }))
           .then((data) => {
             if (cancelled || data === null || data === undefined || !Array.isArray(data.items)) return
-            setItems(data.items.map((item) => ({
-              question: item.question,
-              answer: item.answer,
-              reasoning: item.reasoning,
-              stats: item.stats !== undefined
+            setItems(data.items.map((item) => {
+              const stats = item.stats !== undefined
                 ? item.stats
                 : (item.usage === undefined && item.startedAt === undefined
                   ? undefined
-                  : { usage: item.usage, startedAt: item.startedAt, endedAt: item.endedAt }),
-            })))
+                  : { usage: item.usage, startedAt: item.startedAt, endedAt: item.endedAt })
+              const askedAt = typeof item.askedAt === 'number'
+                ? item.askedAt
+                : (stats === undefined ? undefined : stats.startedAt)
+              return { question: item.question, answer: item.answer, reasoning: item.reasoning, stats, askedAt }
+            }))
           })
           .catch(() => { /* an empty thread is a fine fallback */ })
         return () => { cancelled = true }
@@ -846,7 +883,8 @@ window.__ModuleLoader__.load({
         setDraft('')
         setError(null)
         setBusy(true)
-        setLive({ question, text: '', reasoning: '' })
+        const askedAt = Date.now()
+        setLive({ question, text: '', reasoning: '', askedAt })
         const controller = new AbortController()
         abortRef.current = controller
         let answer = ''
@@ -885,13 +923,13 @@ window.__ModuleLoader__.load({
                 }
                 if (event !== undefined && event.type === 'delta') {
                   answer += event.text
-                  setLive({ question, text: answer, reasoning })
+                  setLive({ question, text: answer, reasoning, askedAt })
                 } else if (event !== undefined && event.type === 'reasoning') {
                   reasoning += event.text
-                  setLive({ question, text: answer, reasoning })
+                  setLive({ question, text: answer, reasoning, askedAt })
                 } else if (event !== undefined && event.type === 'usage') {
                   stats = { usage: event.usage, startedAt: event.startedAt, endedAt: event.endedAt }
-                  setLive({ question, text: answer, reasoning, stats })
+                  setLive({ question, text: answer, reasoning, stats, askedAt })
                 } else if (event !== undefined && event.type === 'error') {
                   failure = event.message
                 }
@@ -910,7 +948,7 @@ window.__ModuleLoader__.load({
           if (answer.trim().length > 0) {
             const clean = sanitizeAnswer(answer).text
             // 思考/用量一起留下，落定后思考行与用量行仍然在
-            setItems((previous) => [...previous, { question, answer: clean, reasoning, stats }].slice(-THREAD_LIMIT))
+            setItems((previous) => [...previous, { question, answer: clean, reasoning, stats, askedAt }].slice(-THREAD_LIMIT))
           }
           if (inputRef.current !== null) inputRef.current.focus()
         }
@@ -944,7 +982,12 @@ window.__ModuleLoader__.load({
         const answer = sanitizeAnswer(item.answer, streaming === true)
         return React.createElement('div', { className: 'dshbtw-turn', key },
           React.createElement('div', { className: 'dshbtw-userRow' },
-            React.createElement('div', { className: 'dshbtw-bubble' }, item.question)),
+            React.createElement('div', { className: 'dshbtw-bubble' }, item.question),
+            React.createElement(UserActions, {
+              text: item.question,
+              at: item.askedAt !== undefined ? item.askedAt : (item.stats === undefined || item.stats === null ? undefined : item.stats.startedAt),
+              t,
+            })),
           item.reasoning === undefined || item.reasoning === ''
             ? null
             : React.createElement(ReasoningRow, { text: item.reasoning, running: streaming === true, t }),
@@ -957,7 +1000,13 @@ window.__ModuleLoader__.load({
 
       const streaming = live === null
         ? null
-        : turnOf({ question: live.question, answer: live.text, reasoning: live.reasoning }, 'live')
+        : turnOf({
+          question: live.question,
+          answer: live.text,
+          reasoning: live.reasoning,
+          stats: live.stats,
+          askedAt: live.askedAt,
+        }, 'live')
       const empty = items.length === 0 && live === null
         ? React.createElement('div', { className: 'dshbtw-empty' }, t('empty.hint'))
         : null
