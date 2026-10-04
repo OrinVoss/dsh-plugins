@@ -178,6 +178,22 @@ function treeTree(node) {
   return { type: typeof node.type === 'function' ? node.type.name || 'Component' : node.type, props, children: (node.children || []).map(treeTree).filter((x) => x !== null) }
 }
 
+check('健康度卡片：样式走主题 token、源码只请求 /memory-api/health', () => {
+  const css = styleTags[0].textContent
+  assert.ok(css.includes('.dshmem-health'), '应有健康度卡片样式')
+  assert.ok(css.includes('.dshmem-meterFill'), '应有预算条样式')
+  const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
+  assert.ok(src.includes('/memory-api/health'), '客户端应请求 /memory-api/health')
+  assert.ok(src.includes('function HealthCard'), '应有 HealthCard 组件')
+})
+
+check('健康度卡片拿不到报告时不渲染（不挡主流程）', () => {
+  const tree = registrations[0].Component({})
+  const json = JSON.stringify(treeTree(tree))
+  assert.ok(!json.includes('该维护了'), '无数据时不应出现维护提示')
+  assert.ok(!json.includes('dshmem-health'), '无数据时不应渲染卡片容器')
+})
+
 console.log(`\n${passed} 项通过，${failures.length} 项失败。\n`)
 if (failures.length) {
   for (const f of failures) console.log(`FAILED: ${f.label}\n${(f.err && f.err.stack) || ''}\n`)

@@ -247,6 +247,7 @@ node plugintest.cjs   # 40 项：mock ctx 下的工具注册形状、execute/ren
 node clienttest.cjs   #  9 项：客户端 bundle 形状、settings.section 注册参数、样式只走主题 token 且不重复外壳留白、沿用宿主控件规格、首次渲染、只请求 /memory-api/*
 node lintmemory.cjs   # 13 项：校验**真实记忆库**的字段约定、摘要一致性、双链与注入预算（见下）
 node reindex.cjs      # 一次性修复：合并索引里同一 target 的重复登记（--dry-run 预演）
+node memcheck.cjs     # 体检（只读）：待合并候选、陈旧条目、作用域可疑、孤岛条目、预算余量
 node import.cjs --from <源> --to <目标> --dry-run   # 导入预演
 ```
 
@@ -475,3 +476,22 @@ This file changed after it was loaded. Use the following content instead of the 
 | `autoAgentsSync: false` | 写记忆不再改 AGENTS.md，改为手动同步——一个会话最多 1 次重注入 | 索引会滞后；但 `memory_search` 永远读磁盘，不受影响 |
 | `maxBlockBytes: 8192` | 每次重注入的份量变小 | 索引不全，需检索补足 |
 | 把写记忆集中在会话开头 | 天然只有 1–2 次重注入 | 靠习惯 |
+
+## 12. 定期维护：lint 守机械，memcheck 提示语义
+
+记忆库会随会话一直变长。**结构性问题交给 lint，语义问题交给体检**——两者都只读，不写盘：
+
+| 工具 | 管什么 | 能判对错吗 |
+|---|---|---|
+| `lintmemory.cjs` | 字段 / 索引 / 摘要一致 / 双链命中 / 注入预算 —— 机械一致性 | 能，错了退出码 1 |
+| `memcheck.cjs` | 待合并候选、陈旧条目、作用域可疑、孤岛条目 —— 语义信号 | 不能，只列清单（`--strict` 时才有退出码 1） |
+| 设置 → 记忆 顶部健康度卡片 | 上面那份体检报告的图形版 | —— |
+
+- 宿主新增只读路由 `GET /memory-api/health`（同一份 `lib/health.js`，按 `INDEX.md` 的 mtime + 60 秒缓存；
+  写入会改 mtime，所以刚写完刷新也能看到新结果）。
+- 阈值可调：`--threshold 0.18`（正文 4-gram 包含度）、`--stale-days 180`、`--limit 12`、`--max-block-bytes 32768`。
+- **建议节奏**：每次大批写入记忆后跑一次 `lintmemory.cjs`；每月、或健康度卡片显示"该维护了"时，
+  跑一次 `memcheck.cjs` 并按清单做合并 / 升格 / 精简。
+- **为什么语义问题不能自动修**：`memory_write` 只有"追加"和"整条覆盖"，没有合并原语；哪两条该并、
+  两套数字该信哪套，需要判断。2026-10-04 那次全库修复就是人工判断的结果：llama.cpp 簇 5 条并成 3 条、
+  硬件簇 2 条并成 1 条、`gpu-mode-do-not-hardcode` 并入预算条、项目条升全局。

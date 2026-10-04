@@ -54,6 +54,20 @@ window.__ModuleLoader__.load({
       '.dshmem-fact b{font-weight:500;color:var(--dsw-alias-label-primary)}',
       '.dshmem-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}',
 
+      // 健康度卡片（体检报告；只在有数据时渲染，失败不挡主流程）
+      '.dshmem-health{margin:12px 0 0;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1)}',
+      '.dshmem-healthWarn{border-color:color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, var(--dsw-alias-border-l2))}',
+      '.dshmem-healthHead{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      '.dshmem-healthHead b{font-weight:500;color:var(--dsw-alias-label-primary)}',
+      '.dshmem-healthSub{margin-top:6px}',
+      '.dshmem-meter{margin-top:8px;height:4px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);overflow:hidden}',
+      '.dshmem-meterFill{display:block;height:100%;background:var(--dsw-alias-state-business-primary)}',
+      '.dshmem-meterFull{background:var(--dsw-alias-state-error-primary)}',
+      '.dshmem-healthList{margin-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      '.dshmem-healthList summary{cursor:pointer}',
+      '.dshmem-healthList ul{margin:6px 0 0;padding-left:18px}',
+      '.dshmem-healthList li{margin:2px 0}',
+
       // 分组标题与行
       '.dshmem-group{padding:18px 0 2px;font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-secondary)}',
       '.dshmem-row{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:24px;width:100%;padding:14px 0;border:none;border-bottom:.5px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;text-align:left;cursor:pointer}',
@@ -163,6 +177,14 @@ window.__ModuleLoader__.load({
       return n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`
     }
 
+    function fmtTime(iso) {
+      if (!iso) return '–'
+      const d = new Date(iso)
+      if (Number.isNaN(d.getTime())) return '–'
+      const p = (n) => String(n).padStart(2, '0')
+      return `${d.getMonth() + 1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    }
+
     // ------------------------------------------------------------------ 组件
     function Button(props) {
       const { variant, children, ...rest } = props
@@ -181,6 +203,49 @@ window.__ModuleLoader__.load({
         props.children)
     }
 
+    /**
+     * 体检卡片：数据来自 /memory-api/health（宿主侧的 lib/health.js）。
+     * 拿不到报告（接口报错、还没回来）时返回 null——体检只是提示，绝不能挡住主流程。
+     */
+    function HealthCard(props) {
+      const data = props && props.health
+      const r = data && data.report
+      if (!r) return null
+      const v = data.verdict || { needsMaintenance: false, reasons: [] }
+      const b = r.budget || {}
+      const pct = Number.isFinite(b.pct) ? Math.min(100, b.pct) : null
+      const mc = r.mergeCandidates || { pairs: [], count: 0, threshold: 0 }
+      const stale = r.stale || { count: 0, days: 0 }
+      const boundary = r.boundarySuspects || []
+      return h('div', { className: 'dshmem-health' + (v.needsMaintenance ? ' dshmem-healthWarn' : '') },
+        h('div', { className: 'dshmem-healthHead' },
+          h('b', null, v.needsMaintenance ? '该维护了' : '健康'),
+          h('span', null, `条目 ${r.counts.global} 全局 / ${r.counts.project} 工作区`),
+          h('span', null, `注入区块 ${fmtBytes(b.blockBytes)} / ${fmtBytes(b.maxBlockBytes)}${pct === null ? '' : `（${pct}%）`}`),
+          h('span', null, `上次索引改动 ${fmtTime(b.indexUpdatedAt)}`),
+          v.reasons.length ? h('span', null, v.reasons.join('；')) : null),
+        pct === null ? null : h('div', { className: 'dshmem-meter', title: `${b.blockBytes} / ${b.maxBlockBytes} 字节` },
+          h('i', { className: 'dshmem-meterFill' + (b.truncated || pct > 90 ? ' dshmem-meterFull' : ''), style: { width: `${pct}%` } })),
+        mc.pairs.length
+          ? h('details', { className: 'dshmem-healthList' },
+              h('summary', null, `疑似重复 ${mc.count} 对（正文包含度 ≥ ${mc.threshold}，点开看清单）`),
+              h('ul', null, mc.pairs.map((p) => h('li', { key: `${p.a}|${p.b}` },
+                h('span', { className: 'dshmem-mono' }, p.a), ' ↔ ',
+                h('span', { className: 'dshmem-mono' }, p.b), `　${Math.round(p.containment * 100)}%`))))
+          : null,
+        (stale.count || boundary.length)
+          ? h('div', { className: 'dshmem-healthHead dshmem-healthSub' },
+              stale.count ? h('span', null, `${stale.count} 条 ${stale.days} 天未更新`) : null,
+              boundary.length ? h('span', null, `${boundary.length} 条作用域待确认`) : null)
+          : null,
+        h('div', { className: 'dshmem-healthHead dshmem-healthSub' },
+          h('span', null, '维护：'),
+          h('span', { className: 'dshmem-mono' }, 'node ~/.dsh/plugins/memory/lintmemory.cjs'),
+          h('span', null, '（机械一致性，可判对错）'),
+          h('span', { className: 'dshmem-mono' }, 'node ~/.dsh/plugins/memory/memcheck.cjs'),
+          h('span', null, '（语义信号，只提示）')))
+    }
+
     function MemorySection() {
       const [status, setStatus] = React.useState(null)
       const [projects, setProjects] = React.useState([])
@@ -192,6 +257,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState('')
       const [notice, setNotice] = React.useState('')
+      const [health, setHealth] = React.useState(null)
 
       const fail = (err) => setError(String((err && err.message) || err))
       const clear = () => { setError(''); setNotice('') }
@@ -214,18 +280,27 @@ window.__ModuleLoader__.load({
         return r
       }, [])
 
+      // 体检失败只把卡片收起来，不报错——它不是主流程的一部分。
+      const loadHealth = React.useCallback(async () => {
+        try {
+          setHealth(await api('/memory-api/health'))
+        } catch (_) {
+          setHealth(null)
+        }
+      }, [])
+
       const refresh = React.useCallback(async (sc, k) => {
         setBusy(true)
         try {
           clear()
-          await Promise.all([loadStatus(), loadProjects()])
+          await Promise.all([loadStatus(), loadProjects(), loadHealth()])
           await loadIndex(sc, k)
         } catch (err) {
           fail(err)
         } finally {
           setBusy(false)
         }
-      }, [loadIndex, loadProjects, loadStatus])
+      }, [loadHealth, loadIndex, loadProjects, loadStatus])
 
       React.useEffect(() => { refresh('global', '') }, [refresh])
 
@@ -522,6 +597,8 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dshmem-spacer' }),
           h(Button, { variant: 'outline', onClick: () => refresh(scope, key), disabled: busy }, '刷新'),
           h(Button, { variant: 'outline', onClick: resync, disabled: busy }, '重新同步 AGENTS.md')),
+
+        h(HealthCard, { health }),
 
         notes,
         list)

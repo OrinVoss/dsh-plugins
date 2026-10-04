@@ -466,6 +466,7 @@ async function main() {
     assert.deepEqual(paths, [
       '/memory-api/delete',
       '/memory-api/entry',
+      '/memory-api/health',
       '/memory-api/list',
       '/memory-api/projects',
       '/memory-api/save',
@@ -618,6 +619,30 @@ async function main() {
     const r = await callRoute(path0, req)
     assert.equal(r.status, 400)
     assert.match(r.json.error, /JSON/)
+  })
+
+  // ------------------------------------------------- 体检接口
+
+  await checkAsync('GET /health 返回体检报告与结论', async () => {
+    const r = await get('/memory-api/health', '/memory-api/health')
+    assert.equal(r.status, 200)
+    assert.equal(r.json.ok, true)
+    assert.ok(r.json.report && r.json.report.counts, '应有 report.counts')
+    assert.ok(Array.isArray(r.json.report.mergeCandidates.pairs), '应有待合并候选数组')
+    assert.ok(Number.isFinite(r.json.report.budget.blockBytes))
+    assert.equal(typeof r.json.verdict.needsMaintenance, 'boolean')
+    assert.ok(Array.isArray(r.json.verdict.reasons))
+  })
+
+  await checkAsync('体检：写入两条高度重复的条目后会被报成待合并候选', async () => {
+    const body = '这段正文专门用来测试记忆库体检的相似度检测，重复度越高越该被合并。'.repeat(10)
+    await run('memory_write', { scope: 'global', name: 'tmp/dup-a', description: '体检回归：重复候选 A', body })
+    await run('memory_write', { scope: 'global', name: 'tmp/dup-b', description: '体检回归：重复候选 B', body: body + '尾巴' })
+    const r = await get('/memory-api/health', '/memory-api/health')
+    const pairs = r.json.report.mergeCandidates.pairs
+    const hit = pairs.find((p) => (p.a.includes('dup-a') && p.b.includes('dup-b')) || (p.a.includes('dup-b') && p.b.includes('dup-a')))
+    assert.ok(hit, `应报出 tmp/dup-a ↔ tmp/dup-b，实际候选：${JSON.stringify(pairs)}`)
+    assert.ok(hit.containment >= r.json.report.mergeCandidates.threshold)
   })
 
   fs.rmSync(root, { recursive: true, force: true })

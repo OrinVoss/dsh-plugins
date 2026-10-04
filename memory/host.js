@@ -42,14 +42,16 @@ function clearLoadError() {
 }
 
 let storeLib
+let healthLib
 try {
-  // DSH 重挂载只重新导入本入口文件，经 CommonJS require 进来的 lib/store.js
-  // 会留在 require.cache 里；显式清掉，保证改完 store.js 立刻生效，
-  // 不必为此重启桌面端。
+  // DSH 重挂载只重新导入本入口文件，经 CommonJS require 进来的 lib/*.js
+  // 会留在 require.cache 里；显式清掉，保证改完立刻生效，不必为此重启桌面端。
   try {
     delete require.cache[require.resolve('./lib/store')]
+    delete require.cache[require.resolve('./lib/health')]
   } catch (_) { /* 首次加载时缓存里本来就没有 */ }
   storeLib = require('./lib/store')
+  healthLib = require('./lib/health')
 } catch (err) {
   reportLoadError(err)
   throw err
@@ -447,6 +449,26 @@ function applyHttp(ctx, store, cfg) {
       ...s,
       project: s.project ? { ...s.project, source: t.kind ? `通过 ${t.kind} 定位` : null } : null
     }
+  }))
+
+  // 体检：设置页顶部的健康度卡片。相似度扫描是 O(N²) 的纯计算，按 INDEX.md 的
+  // mtime + 60 秒双重条件缓存——写入会改 mtime，所以刚写完立刻刷新也能看到新结果。
+  let healthCache = { at: 0, mtime: 0, data: null }
+  route('/memory-api/health', guard(async () => {
+    let mtime = 0
+    try { mtime = fs.statSync(path.join(store.home, storeLib.INDEX_FILE)).mtimeMs } catch (_) { /* 空库 */ }
+    const now = Date.now()
+    if (healthCache.data && healthCache.mtime === mtime && now - healthCache.at < 60 * 1000) {
+      return healthCache.data
+    }
+    const report = healthLib.analyze({
+      home: store.home,
+      agentsPath: store.agentsPath,
+      maxBlockBytes: store.maxBlockBytes
+    })
+    const data = { report, verdict: healthLib.verdict(report) }
+    healthCache = { at: now, mtime, data }
+    return data
   }))
 
   route('/memory-api/projects', guard(async () => ({ projects: store.listProjects() })))

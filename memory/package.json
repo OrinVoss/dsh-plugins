@@ -27,8 +27,10 @@
     "host.js",
     "client.js",
     "lib/store.js",
+    "lib/health.js",
     "cordis.patch.yml",
     "lintmemory.cjs",
+    "memcheck.cjs",
     "reindex.cjs",
     "icon.svg",
     "locale/*.json",
@@ -40,6 +42,7 @@
     "plugintest": "node plugintest.cjs",
     "clienttest": "node clienttest.cjs",
     "lintmemory": "node lintmemory.cjs",
+    "memcheck": "node memcheck.cjs",
     "reindex": "node reindex.cjs"
   }
 }
