@@ -12,6 +12,7 @@
 //   type   reference | feedback | workflow | fact | project
 //          project 只允许「本身就是长期计划/项目」的条目：projects/ 下，或 study/ 白名单
 //   2026-10-04 补：description 不许折行；索引摘要必须与 frontmatter description 一致（两套摘要合一）；
+//                   索引标题不许是英文文件名（标题是显示用的那套，name 只是检索兜底）；
 //                   正文 [[…]] 必须命中某个条目的 name；AGENTS.md 托管区块不许被预算截断
 
 const fs = require('node:fs')
@@ -207,6 +208,24 @@ check('正文双链 [[…]] 都命中某个条目的 name', () => {
     }
   }
   if (bad.length) throw new Error(`双链对不上：\n  ${bad.join('\n  ')}`)
+})
+
+check('索引标题是给人读的，不许直接是文件名（中英混排的源头）', () => {
+  const bad = []
+  for (const idx of indexes) {
+    for (const s of idx.sections) {
+      for (const e of s.entries) {
+        const title = String(e.title || '').trim()
+        if (!title) { bad.push(`${idx.r} → ${e.target}（标题为空）`); continue }
+        if (title === e.target || /\.md$/.test(title)) {
+          bad.push(`${idx.r} → ${e.target}\n      标题现在是文件名：${title}`)
+        }
+      }
+    }
+  }
+  if (bad.length) {
+    throw new Error(`索引标题被写成了文件名（人工标题以中文为主，改完跑一次 reindex 的兄弟脚本或手改 INDEX.md）：\n  ${bad.join('\n  ')}`)
+  }
 })
 
 check('AGENTS.md 托管区块没被预算截断（且余量 > 10%）', () => {

@@ -245,7 +245,7 @@ cd dsh-memory
 node selfcheck.cjs    # 43 项：文件格式、索引增删改（含折行续行、空分组清理、同 target 去重与 repairIndex）、切词/多词检索、项目键寻址、AGENTS.md 托管区块幂等与预算、CRLF 条目解析
 node plugintest.cjs   # 40 项：mock ctx 下的工具注册形状、execute/render 接线、作用域、错误路径、/memory-api/* 全部路由与参数校验
 node clienttest.cjs   #  9 项：客户端 bundle 形状、settings.section 注册参数、样式只走主题 token 且不重复外壳留白、沿用宿主控件规格、首次渲染、只请求 /memory-api/*
-node lintmemory.cjs   # 13 项：校验**真实记忆库**的字段约定、摘要一致性、双链与注入预算（见下）
+node lintmemory.cjs   # 14 项：校验**真实记忆库**的字段约定、摘要一致性、双链与注入预算（见下）
 node reindex.cjs      # 一次性修复：合并索引里同一 target 的重复登记（--dry-run 预演）
 node memcheck.cjs     # 体检（只读）：待合并候选、陈旧条目、作用域可疑、孤岛条目、预算余量
 node import.cjs --from <源> --to <目标> --dry-run   # 导入预演
@@ -264,6 +264,7 @@ node import.cjs --from <源> --to <目标> --dry-run   # 导入预演
 - `description` 不许折行（插件按行解析，续行会被静默吞掉）；
 - 索引摘要必须与 frontmatter `description` 一致（同一事实只留一套摘要）；
 - 正文 `[[…]]` 必须命中某个条目的 `name`；
+- **索引标题不许是英文文件名**（`标题 === target` 或以 `.md` 结尾都不行）——标题是给人读的那套，`name` 只是检索兜底；混用会让设置页列表出现中英混排；
 - `~/.dsh/AGENTS.md` 托管区块没被预算截断、且余量 > 10%。
 
 首次运行就抓到两个真问题：**`parseEntry` 在 CRLF frontmatter 上会丢最后一行元数据**
