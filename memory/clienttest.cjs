@@ -160,6 +160,14 @@ check('组件首次渲染不抛异常并产出状态条', () => {
   assert.ok(json.includes('新建条目'), '应有新建按钮')
 })
 
+check('状态行显示「自动提交」开关（跟住 host 的 status.autoCommit）', () => {
+  const tree = registrations[0].Component({})
+  const json = JSON.stringify(treeTree(tree))
+  assert.ok(json.includes('自动提交'), '状态行应显示自动提交开关')
+  const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
+  assert.ok(src.includes('status.autoCommit'), '应从 status 读 autoCommit')
+})
+
 check('组件渲染时只请求 /memory-api/* 且不越界', () => {
   assert.ok(requests.length > 0)
   for (const url of requests) assert.match(url, /^\/memory-api\//, url)

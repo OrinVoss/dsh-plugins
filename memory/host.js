@@ -129,7 +129,8 @@ function applyInner(ctx, config) {
     home: cfg.home,
     dshHome: cfg.dshHome,
     agentsPath: cfg.agentsPath,
-    maxBlockBytes: cfg.maxBlockBytes
+    maxBlockBytes: cfg.maxBlockBytes,
+    autoCommit: cfg.autoCommit
   })
   const autoSync = cfg.autoAgentsSync !== false
 
@@ -199,7 +200,10 @@ function applyInner(ctx, config) {
           text: [
             `${res.updated ? '已更新' : '已写入'}${where}：\`${res.target}\``,
             `索引：\`${res.indexFile}\`（分组「${res.section}」）`,
-            autoSync ? `全局指令 \`${store.agentsPath}\` 的记忆索引区块已同步，下个会话自动可见。` : ''
+            autoSync ? `全局指令 \`${store.agentsPath}\` 的记忆索引区块已同步，下个会话自动可见。` : '',
+            res.commit && res.commit.committed ? '记忆库已本地提交（未推送）。'
+              : res.commit && res.commit.reason === 'not-a-repo' ? '（记忆库不是 git 仓库，未提交）'
+                : res.commit && res.commit.reason === 'disabled' ? '' : ''
           ].filter(Boolean).join('\n')
         }
       })
@@ -328,7 +332,8 @@ function applyInner(ctx, config) {
         sync(cwd)
         const pruned = (res.pruned || []).length ? `，并剪掉了变空的分组「${res.pruned.join('、')}」` : ''
         return {
-          text: `已删除${scope === 'global' ? '全局' : '工作区'}记忆 \`${res.target}\`${res.deindexed ? '（并已从索引移除）' : ''}${pruned}。`
+          text: `已删除${scope === 'global' ? '全局' : '工作区'}记忆 \`${res.target}\`${res.deindexed ? '（并已从索引移除）' : ''}${pruned}。` +
+          (res.commit && res.commit.committed ? '\n记忆库已本地提交（未推送）。' : '')
         }
       })
     }

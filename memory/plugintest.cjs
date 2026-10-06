@@ -645,6 +645,38 @@ async function main() {
     assert.ok(hit.containment >= r.json.report.mergeCandidates.threshold)
   })
 
+  // ------------------------------------------------- 自动提交（只本地 commit、不 push）
+
+  await checkAsync('自动提交：home 不是 git 仓库时静默跳过，不抛错', async () => {
+    // 上面所有用例用的就是这个非仓库的临时 home；走到这里没抛错即通过
+    const probe = storeLib.createStore({ home, agentsPath })
+    const r = probe.commitLibrary('probe')
+    assert.equal(r.committed, false)
+    assert.equal(r.reason, 'not-a-repo')
+  })
+
+  await checkAsync('自动提交：git 仓库里写入后产生一次本地提交，且不推送', async () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-git-'))
+    // stdio 一律 ignore：沙箱下用管道捕获子进程输出会 EPERM
+    const git = (args) => require('node:child_process').execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+    git(['init', '-b', 'main'])
+    git(['config', 'user.email', 'test@example.com'])
+    git(['config', 'user.name', 'test'])
+    const agents2 = path.join(repo, 'AGENTS.md')
+    const s2 = storeLib.createStore({ home: repo, agentsPath: agents2, maxBlockBytes: 32768 })
+    const w = s2.write('global', { name: 'tmp/auto', description: '自动提交用例', body: '正文' })
+    assert.equal(w.ok, true)
+    assert.equal(w.commit.committed, true, '写入后应产生一次提交')
+    // 不读 git 输出（管道会 EPERM），改看 git 自己写的 COMMIT_EDITMSG
+    const msg = fs.readFileSync(path.join(repo, '.git', 'COMMIT_EDITMSG'), 'utf8')
+    assert.match(msg, /tmp\/auto\.md/, '提交信息里应带条目路径')
+    // 删除也应提交
+    const f = s2.forget('global', 'tmp/auto')
+    assert.equal(f.removed, true)
+    assert.equal(f.commit.committed, true, '删除后也应产生一次提交')
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
   fs.rmSync(root, { recursive: true, force: true })
 
   console.log(`\n${passed} 项通过，${failures.length} 项失败。\n`)

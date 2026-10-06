@@ -608,6 +608,8 @@ window.__ModuleLoader__.load({
             h('b', null, status ? `${fmtBytes(status.blockBytes)} / ${fmtBytes(status.maxBlockBytes)}` : '–')),
           h('span', null, '工作区库 ',
             h('b', null, status ? status.projects : '–')),
+          h('span', null, '自动提交 ',
+            h('b', null, status ? (status.autoCommit ? '开' : '关') : '–')),
           h('span', { className: 'dshmem-spacer' }),
           h(Button, { variant: 'outline', onClick: () => refresh(scope, key), disabled: busy }, '刷新'),
           h(Button, { variant: 'outline', onClick: resync, disabled: busy }, '重新同步 AGENTS.md')),

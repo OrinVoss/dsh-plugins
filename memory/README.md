@@ -225,6 +225,7 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `syncOnStartup` | `true` | 插件加载时先同步一次 |
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
 | `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
+| `autoCommit` | `true` | 落盘后把记忆库**本地提交**一次（`git add -A && git commit`，**从不 push**）。home 不是 git 仓库时静默跳过；任何 git 失败都吞掉、不影响记忆写入。stdio 用 `ignore`（沙箱下管道捕获子进程输出会 EPERM）。设 `false` 关掉 |
 
 ## 6. 从 Z code 导入已有记忆
 
@@ -478,7 +479,20 @@ This file changed after it was loaded. Use the following content instead of the 
 | `maxBlockBytes: 8192` | 每次重注入的份量变小 | 索引不全，需检索补足 |
 | 把写记忆集中在会话开头 | 天然只有 1–2 次重注入 | 靠习惯 |
 
-## 12. 定期维护：lint 守机械，memcheck 提示语义
+## 12. 自动提交（`autoCommit`）
+
+`memory_write` / `memory_forget` / 设置页保存与删除落盘后，会在记忆根跑一次
+`git add -A && git commit -m "<作用域>：<条目路径>"` —— **只本地 commit，从不 push**。
+
+**为什么必须由插件来做**：库 2026-10-04 纳入 git 后，10-04~10-06 的 16 条新记忆整整两天没进
+版本控制——写入方只落盘、不提交，而"每次更改都要提交"是用户明写的约定。人（模型）写完不会记得
+手动提交，所以这条不变量只能由唯一会写库的东西来守。
+
+**安全边界**：home 不是 git 仓库 → 静默跳过；`git` 不存在、仓库损坏、`add` 失败 → 吞掉错误并
+在工具回执里说明，**绝不让 git 问题挡住"记忆已经写进磁盘"**；没有实际变更（同一条重复写）→
+以 `nothing-to-commit` 正常返回。子进程 stdio 一律 `'ignore'`（DSH 沙箱下用管道捕获输出会 EPERM）。
+
+## 13. 定期维护：lint 守机械，memcheck 提示语义
 
 记忆库会随会话一直变长。**结构性问题交给 lint，语义问题交给体检**——两者都只读，不写盘：
 

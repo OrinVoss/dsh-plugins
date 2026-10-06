@@ -28,6 +28,7 @@
 // 索引条目格式：- [标题](相对路径.md) — 摘要
 
 const fs = require('node:fs')
+const { execFileSync } = require('node:child_process')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const os = require('node:os')
@@ -469,6 +470,50 @@ function createStore(options) {
   const maxBlockBytes = Number.isFinite(opts.maxBlockBytes) && opts.maxBlockBytes > 0
     ? Math.floor(opts.maxBlockBytes)
     : 20000
+  // 落盘后自动本地提交（只 commit、不 push）。默认开；home 不是 git 仓库时自动跳过。
+  const autoCommit = opts.autoCommit !== false
+  const commitTimeoutMs = Number.isFinite(opts.commitTimeoutMs) && opts.commitTimeoutMs > 0
+    ? Math.floor(opts.commitTimeoutMs)
+    : 15000
+
+  /**
+   * 把记忆库本身提交一次（**只本地 commit，绝不 push**）。
+   *
+   * 为什么放在 store 层：memory_write 工具、设置页保存/删除都走这里，放这一层才能守住
+   * "库里的每一笔改动都进版本控制"这条不变量。2026-10-04 把库纳入 git 之后，
+   * 10-04~10-06 的 16 条新记忆整整两天没进 git —— 就是因为写入方不知道要提交。
+   *
+   * 三条硬约束：
+   *   · 只在 home 是 git 仓库时动手，不是仓库就静默跳过
+   *   · stdio 一律 'ignore'：DSH 沙箱下用管道捕获子进程输出会 EPERM
+   *   · 任何失败都吞掉、绝不抛 —— git 出问题不能挡住"记忆已经写进磁盘"这件事
+   */
+  function commitLibrary(message) {
+    if (!autoCommit) return { committed: false, reason: 'disabled' }
+    try {
+      if (!fs.existsSync(path.join(home, '.git'))) return { committed: false, reason: 'not-a-repo' }
+    } catch (_) {
+      return { committed: false, reason: 'not-a-repo' }
+    }
+    const run = (args) => execFileSync('git', args, {
+      cwd: home,
+      stdio: 'ignore',
+      timeout: commitTimeoutMs,
+      windowsHide: true
+    })
+    try {
+      run(['add', '-A'])
+    } catch (err) {
+      return { committed: false, reason: 'add-failed: ' + String((err && err.message) || err) }
+    }
+    try {
+      run(['commit', '-m', message])
+    } catch (_) {
+      // 没有可提交的内容（同一条重复写、正文没变）会以退出码 1 结束 —— 属正常
+      return { committed: false, reason: 'nothing-to-commit' }
+    }
+    return { committed: true }
+  }
 
   /** 某个作用域对应的根目录与索引文件。cwd 也可以直接传项目键。 */
   function scopePaths(scope, cwdOrKey) {
@@ -540,6 +585,7 @@ function createStore(options) {
       maxBlockBytes,
       blockBytes,
       indexUpdatedAt,
+      autoCommit,
       global: { count: global.entries.length, bytes: Buffer.byteLength(readText(indexPath) || '', 'utf8') },
       project: project ? { key: project.key, count: project.entries.length, exists: project.exists } : null,
       projects: listProjects().length
@@ -628,10 +674,14 @@ function createStore(options) {
     )
     writeTextAtomic(sp.indexFile, nextIndex)
     const landed = indexEntries(nextIndex).find((e) => e.target === target)
+    const commit = commitLibrary(
+      `记忆写入（${sp.scope}）：${target}${input.title ? ' — ' + String(input.title).trim() : ''}`
+    )
 
     return {
       ok: true,
       updated: existingText !== null,
+      commit,
       scope: sp.scope,
       key: sp.key,
       name: slug,
@@ -665,7 +715,10 @@ function createStore(options) {
       try { fs.rmdirSync(dir) } catch (_) { break }
       dir = path.dirname(dir)
     }
-    return { ok: existed || deindexed, removed: existed, deindexed, pruned, scope: sp.scope, name: slug, target }
+    const commit = existed || deindexed
+      ? commitLibrary(`记忆删除（${sp.scope}）：${target}`)
+      : { committed: false, reason: 'nothing-to-commit' }
+    return { ok: existed || deindexed, removed: existed, deindexed, pruned, scope: sp.scope, name: slug, target, commit }
   }
 
   function allEntryFiles(scope, cwd) {
@@ -858,6 +911,7 @@ function createStore(options) {
     search,
     buildBlock,
     syncAgents,
+    commitLibrary,
     allEntryFiles
   }
 }

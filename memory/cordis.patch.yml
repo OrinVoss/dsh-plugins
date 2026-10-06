@@ -11,6 +11,7 @@
       name: dsh-memory
       config:
         maxBlockBytes: 32768
+        autoCommit: true
         autoAgentsSync: true
         settingsPage: true
         syncOnStartup: true
