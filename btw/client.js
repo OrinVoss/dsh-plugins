@@ -62,6 +62,8 @@ window.__ModuleLoader__.load({
       'stats.count': '{count} tok',
       'stats.usageTitle': '本轮用量',
       'error.render': '面板渲染出错：',
+      'note.maxTokens': '已达到输出上限，回答被截断。',
+      'note.aborted': '已停止。',
       'think.title': '思考',
       'error.noSession': '请先打开一个会话',
     }
@@ -85,6 +87,8 @@ window.__ModuleLoader__.load({
       'stats.count': '{count} tok',
       'stats.usageTitle': 'Turn usage',
       'error.render': 'Panel render error: ',
+      'note.maxTokens': 'Output limit reached; the answer is cut off.',
+      'note.aborted': 'Stopped.',
       'think.title': 'Think',
       'error.noSession': 'Open a session first',
     }
@@ -108,6 +112,8 @@ window.__ModuleLoader__.load({
       '.dshbtw-timeStart{font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);white-space:nowrap;padding-right:12px}',
       '.dshbtw-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702), 82%);box-sizing:border-box;padding:10px 16px;border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-bubble);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
       '.dshbtw-answer{min-width:0}',
+      '.dshbtw-turnNote{margin-top:8px;color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
+      '.dshbtw-turnNote[data-kind="max-tokens"]{color:var(--dsw-alias-state-warn-primary)}',
 
       // 回答下的操作行：照 primitives 的 MessageIconActions.module.css
       // （28px 方钮、15px 图标、gap 8、hover 底色）+ AssistantMarkdown 的
@@ -646,6 +652,12 @@ window.__ModuleLoader__.load({
       }
       return seen ? sum : undefined
     }
+    /** 一轮结束时的状态说明：被输出上限截断 / 被停止时给一行交代，不要静默停住。 */
+    function turnNote(reason, t) {
+      if (reason === 'max-tokens') return { kind: 'max-tokens', text: t('note.maxTokens') }
+      if (reason === 'aborted') return { kind: 'aborted', text: t('note.aborted') }
+      return null
+    }
     /* @btw-stats:end */
 
     /**
@@ -799,6 +811,7 @@ window.__ModuleLoader__.load({
     const Turn = React.memo(function Turn(props) {
       const { item, streaming, isLast, t } = props
       const answer = sanitizeAnswer(item.answer, streaming === true)
+      const note = streaming === true ? null : turnNote(item.finishReason, t)
       return React.createElement('div', {
         className: 'dshbtw-turn',
         'data-last': isLast === true ? '1' : undefined,
@@ -822,7 +835,10 @@ window.__ModuleLoader__.load({
         ? null
         : React.createElement(React.Fragment, null,
           React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)),
-          React.createElement(AnswerActions, { text: answer.text, stats: item.stats, t })))
+          React.createElement(AnswerActions, { text: answer.text, stats: item.stats, t })),
+      note === null
+        ? null
+        : React.createElement('div', { className: 'dshbtw-turnNote', 'data-kind': note.kind }, note.text))
     }, (previous, next) => previous.item === next.item
       && previous.streaming === next.streaming
       && previous.isLast === next.isLast
@@ -935,7 +951,14 @@ window.__ModuleLoader__.load({
               const askedAt = typeof item.askedAt === 'number'
                 ? item.askedAt
                 : (stats === undefined ? undefined : stats.startedAt)
-              return { question: item.question, answer: item.answer, reasoning: item.reasoning, stats, askedAt }
+              return {
+                question: item.question,
+                answer: item.answer,
+                reasoning: item.reasoning,
+                stats,
+                askedAt,
+                finishReason: item.finishReason,
+              }
             })
             // 快照为空而本地已有内容时不清屏：宿主刚被重载/线程已被回收时，
             // 一次空快照会把看得见的整段对话抹掉。
@@ -988,6 +1011,7 @@ window.__ModuleLoader__.load({
         let reasoning = ''
         let failure
         let stats = null
+        let finishReason = 'stop'
         try {
           const res = await fetch('/btw-api/ask', {
             method: 'POST',
@@ -1027,6 +1051,8 @@ window.__ModuleLoader__.load({
                 } else if (event !== undefined && event.type === 'usage') {
                   stats = { usage: event.usage, startedAt: event.startedAt, endedAt: event.endedAt }
                   setLive({ question, text: answer, reasoning, stats, askedAt })
+                } else if (event !== undefined && event.type === 'finish') {
+                  finishReason = typeof event.reason === 'string' ? event.reason : 'stop'
                 } else if (event !== undefined && event.type === 'error') {
                   failure = event.message
                 }
@@ -1035,7 +1061,8 @@ window.__ModuleLoader__.load({
             }
           }
         } catch (caught) {
-          if (caught && caught.name !== 'AbortError') failure = String(caught.message || caught)
+          if (caught && caught.name === 'AbortError') finishReason = 'aborted'
+          else if (caught) failure = String(caught.message || caught)
         } finally {
           abortRef.current = null
           setBusy(false)
@@ -1047,7 +1074,7 @@ window.__ModuleLoader__.load({
           if (answer.trim().length > 0 || reasoning.trim().length > 0) {
             const clean = sanitizeAnswer(answer).text
             // 思考/用量一起留下，落定后思考行与用量行仍然在
-            setItems((previous) => [...previous, { question, answer: clean, reasoning, stats, askedAt }].slice(-THREAD_LIMIT))
+            setItems((previous) => [...previous, { question, answer: clean, reasoning, stats, askedAt, finishReason }].slice(-THREAD_LIMIT))
           }
           if (inputRef.current !== null) inputRef.current.focus()
         }

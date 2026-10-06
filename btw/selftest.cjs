@@ -143,7 +143,7 @@ async function main() {
     assert.equal(request.model, 'test-model')
     assert.equal(request.tools, undefined, 'no tools may be sent')
     assert.equal(request.sessionId, 's1')
-    assert.equal(request.maxTokens, 4096, 'answer token cap clamps the request header value')
+    assert.equal(request.maxTokens, 128000, 'session maxTokens passes through: thinking counts against this budget')
 
     // 真·系统提示词，而不是塞在 user 消息里的弱指令
     assert.ok(typeof request.system === 'string' && request.system.includes('side questions'), 'system guidance is a real system prompt')
@@ -196,6 +196,8 @@ async function main() {
     // 用量与时间同样要留在快照里（重挂载后面板那行还在）
     assert.equal(payload.items[0].usage.inputTokens, 100)
     assert.ok(payload.items[0].endedAt >= payload.items[0].startedAt)
+    // 结束原因也要留下（max-tokens 时面板要能提示被截断）
+    assert.equal(payload.items[0].finishReason, 'stop')
 
     const clear = fakeResponse()
     routes.get('/btw-api/clear')(fakeRequest('POST', { sessionId: 's1' }), clear)
@@ -405,7 +407,7 @@ async function main() {
     const end = source.indexOf(endMarker)
     assert.ok(start >= 0 && end > start, 'client.js must keep the stats markers')
     const stats = new Function(source.slice(start + startMarker.length, end)
-      + '\n; return { formatTokens, formatClock, totalTokens, interpolate }')()
+      + '\n; return { formatTokens, formatClock, totalTokens, interpolate, turnNote }')()
 
     // 占位符插值（插件 locale 座位是纯查表，必须自己替换）
     assert.equal(stats.interpolate('用量 {total}', { total: '9.9M' }), '用量 9.9M')
@@ -432,6 +434,13 @@ async function main() {
     assert.equal(stats.totalTokens(undefined), undefined)
     assert.equal(stats.totalTokens({ totalTokens: 420 }), 420)
     assert.equal(stats.totalTokens({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 300 }), 420)
+
+    // 结束原因要能落成一行交代（被输出上限截断 / 被停止时不再静默停住）
+    const seat = (key) => key
+    assert.equal(stats.turnNote('stop', seat), null)
+    assert.equal(stats.turnNote(undefined, seat), null)
+    assert.equal(stats.turnNote('max-tokens', seat).kind, 'max-tokens')
+    assert.equal(stats.turnNote('aborted', seat).kind, 'aborted')
   }
 
   // 9. 只出思考、没有正文的一轮也必须留下（否则提问 + 思考整轮凭空消失）

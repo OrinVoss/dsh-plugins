@@ -25,7 +25,8 @@ const NAME = 'dsh-btw'
 const THREAD_LIMIT = 20
 
 /** 旁支提问的输出上限：够长到能解释，又不至于把主回合的额度吃掉。 */
-const ANSWER_MAX_TOKENS = 4096
+/** 会话没给出上限时的默认输出上限（思考 + 正文合计）。 */
+const ANSWER_MAX_TOKENS = 8192
 
 /**
  * 旁支提问的引导词。
@@ -119,8 +120,10 @@ function resolveCallConfig(ctx, agent) {
   const header = typeof agent.session.requestHeader === 'function' ? agent.session.requestHeader() : undefined
   const config = header && header.config ? header.config : undefined
   if (config && typeof config.provider === 'string' && typeof config.model === 'string') {
+    // 跟随会话自己的输出上限，**不再压低**：思考 token 也算在这个预算里，
+    // 早先压到 4096 会让"想一半就到顶"——流结束、没有正文，看起来像思考被中断。
     const maxTokens = typeof config.maxTokens === 'number' && config.maxTokens > 0
-      ? Math.min(config.maxTokens, ANSWER_MAX_TOKENS)
+      ? config.maxTokens
       : ANSWER_MAX_TOKENS
     return {
       provider: config.provider,
@@ -290,7 +293,7 @@ module.exports = {
       const controller = new AbortController()
       inflight.set(sessionId, controller)
       // 客户端断开（Esc、关 tab、刷新）时立刻停掉模型调用。
-      res.on('close', () => { controller.abort() })
+      res.on('close', () => { if (!res.writableEnded) controller.abort() })
 
       res.statusCode = 200
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
@@ -303,6 +306,7 @@ module.exports = {
       let reasoning = ''
       let usage
       let failure
+      let finishReason = 'stop'
       const startedAt = Date.now()
       try {
         const messages = buildMessages(agent.session, thread, question)
@@ -324,10 +328,11 @@ module.exports = {
             usage = chunk.usage
           } else if (chunk.type === 'finish') {
             const reason = chunk.reason || {}
+            finishReason = reason.kind || 'stop'
             if (reason.kind === 'error' || reason.kind === 'aborted') {
               failure = (reason.failure && reason.failure.message) || reason.kind
             }
-            send(res, { type: 'finish', reason: reason.kind || 'stop' })
+            send(res, { type: 'finish', reason: finishReason })
           }
         }
       } catch (error) {
@@ -346,7 +351,7 @@ module.exports = {
       if (answer.trim().length > 0 || reasoning.trim().length > 0) {
         // 思考/用量一并留在内存线程里：否则一轮结束、思考行与用量行就从面板里消失了。
         // 重放给模型时只用 answer，不要把 reasoning 再喂回去。
-        thread.push({ question, answer, reasoning, usage, startedAt, endedAt })
+        thread.push({ question, answer, reasoning, usage, startedAt, endedAt, finishReason })
         trimThread(sessionId)
       }
       res.end()
