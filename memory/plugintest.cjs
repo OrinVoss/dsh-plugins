@@ -647,6 +647,20 @@ async function main() {
 
   // ------------------------------------------------- 自动提交（只本地 commit、不 push）
 
+  await checkAsync('namemap：能分辨路径式与叶子名，并给出真实 name', async () => {
+    const nm = require('./namemap.cjs')
+    const repo2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-nm-'))
+    const s3 = storeLib.createStore({ home: repo2, agentsPath: path.join(repo2, 'AGENTS.md'), maxBlockBytes: 32768, autoCommit: false })
+    s3.write('global', { name: 'tools/leaf-probe', description: '路径式探针', body: 'x' })
+    s3.write('global', { name: 'leaf-probe', description: '叶子名探针', body: 'y' })
+    const rows = nm.collect(repo2)
+    const a = rows.find((r) => r.target === 'tools/leaf-probe.md')
+    const b = rows.find((r) => r.target === 'leaf-probe.md')
+    assert.ok(a && a.style === 'path' && a.name === 'tools/leaf-probe', '路径式应判为 path')
+    assert.ok(b && b.style === 'leaf' && b.name === 'leaf-probe', '叶子名应判为 leaf')
+    fs.rmSync(repo2, { recursive: true, force: true })
+  })
+
   await checkAsync('自动提交：home 不是 git 仓库时静默跳过，不抛错', async () => {
     // 上面所有用例用的就是这个非仓库的临时 home；走到这里没抛错即通过
     const probe = storeLib.createStore({ home, agentsPath })

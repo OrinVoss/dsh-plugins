@@ -249,6 +249,7 @@ node clienttest.cjs   #  9 项：客户端 bundle 形状、settings.section 注�
 node lintmemory.cjs   # 14 项：校验**真实记忆库**的字段约定、摘要一致性、双链与注入预算（见下）
 node reindex.cjs      # 一次性修复：合并索引里同一 target 的重复登记（--dry-run 预演）
 node memcheck.cjs     # 体检（只读）：待合并候选、陈旧条目、作用域可疑、孤岛条目、预算余量
+node namemap.cjs      # 查 name（只读）：库里路径式与叶子名混用，写 [[…]] 前先查；--leaf 只看叶子名
 node import.cjs --from <源> --to <目标> --dry-run   # 导入预演
 ```
 
@@ -500,6 +501,7 @@ This file changed after it was loaded. Use the following content instead of the 
 |---|---|---|
 | `lintmemory.cjs` | 字段 / 索引 / 摘要一致 / 双链命中 / 注入预算 —— 机械一致性 | 能，错了退出码 1 |
 | `memcheck.cjs` | 待合并候选、陈旧条目、作用域可疑、孤岛条目 —— 语义信号 | 不能，只列清单（`--strict` 时才有退出码 1） |
+| `namemap.cjs` | 查条目的真实 `name`（库里**命名不统一**：路径式 53 条 / 叶子名 35 条） | 只读工具，永远不挡 |
 | 设置 → 记忆 顶部健康度卡片 | 上面那份体检报告的图形版 | —— |
 
 - 宿主新增只读路由 `GET /memory-api/health`（同一份 `lib/health.js`，按 `INDEX.md` 的 mtime + 60 秒缓存；

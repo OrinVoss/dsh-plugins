@@ -43,6 +43,7 @@
     "clienttest": "node clienttest.cjs",
     "lintmemory": "node lintmemory.cjs",
     "memcheck": "node memcheck.cjs",
+    "namemap": "node namemap.cjs",
     "reindex": "node reindex.cjs"
   }
 }

@@ -207,7 +207,10 @@ check('正文双链 [[…]] 都命中某个条目的 name', () => {
       bad.push(`${e.r} → [[${x}]]`)
     }
   }
-  if (bad.length) throw new Error(`双链对不上：\n  ${bad.join('\n  ')}`)
+  if (bad.length) throw new Error(
+    '双链对不上（库里 name 命名不统一：路径式与叶子名混用——' +
+    '用 `node namemap.cjs <关键词>` 查目标条目的真实 name）：\n  ' + bad.join('\n  ')
+  )
 })
 
 check('索引标题是给人读的，不许直接是文件名（中英混排的源头）', () => {
