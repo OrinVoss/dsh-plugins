@@ -31,6 +31,13 @@ function harness(options = {}) {
           if (message.role === 'assistant') void message.source.replayState
         }
         if (options.throwOnStream) throw new Error('boom')
+        if (options.reasoningOnly) {
+          // 只出思考、没有正文：这一轮同样要留在内存线程里，否则客户端整轮消失
+          yield { type: 'reasoning-delta', index: 0, text: '只在思考，还没写正文' }
+          yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+          return
+        }
         if (options.markupAnswer) {
           yield { type: 'text-delta', index: 0, text: '先看：<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="pwsh">' }
           yield { type: 'text-delta', index: 0, text: '</｜｜DSML｜｜ calls>完了。' }
@@ -425,6 +432,29 @@ async function main() {
     assert.equal(stats.totalTokens(undefined), undefined)
     assert.equal(stats.totalTokens({ totalTokens: 420 }), 420)
     assert.equal(stats.totalTokens({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 300 }), 420)
+  }
+
+  // 9. 只出思考、没有正文的一轮也必须留下（否则提问 + 思考整轮凭空消失）
+  {
+    const { routes, calls } = harness({ reasoningOnly: true })
+    routes.get('/btw-api/clear')(fakeRequest('POST', { sessionId: 's1' }), fakeResponse())
+    await tick()
+    const res = fakeResponse()
+    routes.get('/btw-api/ask')(fakeRequest('POST', { sessionId: 's1', question: '只思考不回答的问题' }), res)
+    await tick()
+    const events = res.events()
+    assert.equal(events.filter((e) => e.type === 'delta').length, 0, 'no text deltas')
+    assert.equal(events.filter((e) => e.type === 'reasoning').length, 1, 'reasoning streamed')
+    const snapshot = fakeResponse()
+    const threadReq = fakeRequest('GET')
+    threadReq.url = '/btw-api/thread?sessionId=s1'
+    routes.get('/btw-api/thread')(threadReq, snapshot)
+    const payload = JSON.parse(snapshot.frames.join(''))
+    assert.equal(payload.items.length, 1, 'reasoning-only turn is kept')
+    assert.equal(payload.items[0].question, '只思考不回答的问题')
+    assert.equal(payload.items[0].answer, '')
+    assert.ok(payload.items[0].reasoning.includes('只在思考'), 'reasoning is kept')
+    assert.equal(calls.length, 1)
   }
 
   console.log('selftest: all checks passed')

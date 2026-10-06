@@ -61,6 +61,7 @@ window.__ModuleLoader__.load({
       'stats.consumed': '用量 {total}',
       'stats.count': '{count} tok',
       'stats.usageTitle': '本轮用量',
+      'error.render': '面板渲染出错：',
       'think.title': '思考',
       'error.noSession': '请先打开一个会话',
     }
@@ -83,6 +84,7 @@ window.__ModuleLoader__.load({
       'stats.consumed': 'Usage {total}',
       'stats.count': '{count} tok',
       'stats.usageTitle': 'Turn usage',
+      'error.render': 'Panel render error: ',
       'think.title': 'Think',
       'error.noSession': 'Open a session first',
     }
@@ -759,6 +761,73 @@ window.__ModuleLoader__.load({
       }, renderBlocks(parseMarkdown(text), t))
     }
 
+    /**
+     * 渲染兜底：面板里任何一处渲染抛错，都不该让整个 tab 变白板。
+     * 出错时只显示一行可读的错误；内容再次变化（resetKey 变）就自动重试。
+     */
+    class BodyBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+
+      componentDidUpdate(previous) {
+        if (this.state.error !== null && previous.resetKey !== this.props.resetKey) this.setState({ error: null })
+      }
+
+      render() {
+        if (this.state.error === null) return this.props.children
+        const message = this.state.error !== null && this.state.error.message !== undefined
+          ? String(this.state.error.message)
+          : String(this.state.error)
+        return React.createElement('div', { className: 'dshbtw-root' },
+          React.createElement('div', { className: 'dshbtw-error' }, (this.props.t === undefined ? '' : this.props.t('error.render')) + message))
+      }
+    }
+
+    /**
+     * 一轮问答：提问行（时间 + 复制）+ 思考行 + 回答行（操作行 + 用量 + 时间）。
+     *
+     * memo（自定义比较：忽略 t 的身份，只比 item/streaming/isLast）：流式时每来一个
+     * delta 只重渲染 live 这一轮，历史轮次不再跟着重解析 Markdown——长线程下这是
+     * 「卡住」的主要来源。
+     */
+    const Turn = React.memo(function Turn(props) {
+      const { item, streaming, isLast, t } = props
+      const answer = sanitizeAnswer(item.answer, streaming === true)
+      return React.createElement('div', {
+        className: 'dshbtw-turn',
+        'data-last': isLast === true ? '1' : undefined,
+      },
+      React.createElement('div', { className: 'dshbtw-userRow' },
+        React.createElement('div', { className: 'dshbtw-bubble' }, item.question),
+        React.createElement(UserActions, {
+          text: item.question,
+          at: item.askedAt !== undefined ? item.askedAt : (item.stats === undefined || item.stats === null ? undefined : item.stats.startedAt),
+          t,
+        })),
+      item.reasoning === undefined || item.reasoning === ''
+        ? null
+        : React.createElement(ReasoningRow, {
+          text: item.reasoning,
+          running: streaming === true,
+          t,
+          onToggle: props.onToggle,
+        }),
+      answer.text === ''
+        ? null
+        : React.createElement(React.Fragment, null,
+          React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)),
+          React.createElement(AnswerActions, { text: answer.text, stats: item.stats, t })))
+    }, (previous, next) => previous.item === next.item
+      && previous.streaming === next.streaming
+      && previous.isLast === next.isLast
+      && previous.onToggle === next.onToggle)
+
     /** 思考行：默认折叠成一行（图标 + 标题 + 末段首行摘要），点一下展开全文。 */
     function ReasoningRow(props) {
       const [open, setOpen] = React.useState(false)
@@ -771,7 +840,12 @@ window.__ModuleLoader__.load({
         className: 'dshbtw-thinkRow',
         type: 'button',
         'aria-expanded': open,
-        onClick: () => setOpen((value) => !value),
+        onClick: () => {
+          // 展开/收起是"我要读这一段"的意图：解除跟随尾部，否则流式继续把展开的
+          // 正文顶出视口（用户看到的就是"思考过程不停往上滚、翻不回去"）。
+          if (typeof props.onToggle === 'function') props.onToggle()
+          setOpen((value) => !value)
+        },
       },
       React.createElement('span', { className: 'dshbtw-thinkLeading' },
         React.createElement('span', { className: 'dshbtw-thinkIcon' }, React.createElement(IconThink, {})),
@@ -834,6 +908,9 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
       const scrollRef = React.useRef(null)
+      const followRef = React.useRef(true)
+      /** 展开思考行 = 用户要读这一段，解除跟随尾部（稳定引用，避免击穿 Turn 的 memo）。 */
+      const unpin = React.useCallback(() => { followRef.current = false }, [])
       const inputRef = React.useRef(null)
       const abortRef = React.useRef(null)
 
@@ -849,7 +926,7 @@ window.__ModuleLoader__.load({
           .then((res) => (res.ok ? res.json() : { items: [] }))
           .then((data) => {
             if (cancelled || data === null || data === undefined || !Array.isArray(data.items)) return
-            setItems(data.items.map((item) => {
+            const mapped = data.items.map((item) => {
               const stats = item.stats !== undefined
                 ? item.stats
                 : (item.usage === undefined && item.startedAt === undefined
@@ -859,16 +936,29 @@ window.__ModuleLoader__.load({
                 ? item.askedAt
                 : (stats === undefined ? undefined : stats.startedAt)
               return { question: item.question, answer: item.answer, reasoning: item.reasoning, stats, askedAt }
-            }))
+            })
+            // 快照为空而本地已有内容时不清屏：宿主刚被重载/线程已被回收时，
+            // 一次空快照会把看得见的整段对话抹掉。
+            setItems((previous) => (mapped.length === 0 && previous.length > 0 ? previous : mapped))
           })
           .catch(() => { /* an empty thread is a fine fallback */ })
         return () => { cancelled = true }
       }, [sessionId])
 
+      // 跟随尾部：只在"用户本来就在底部附近"时才自动滚。流式每来一个 delta 就强制
+      // `scrollTop = scrollHeight` 会把正在往上翻的人一直拽回底部（展开思考行时尤其明显），
+      // 主会话也是同一套语义（data-chat-following-tail）。
       React.useEffect(() => {
         const node = scrollRef.current
-        if (node !== null) node.scrollTop = node.scrollHeight
+        if (node === null || !followRef.current) return
+        node.scrollTop = node.scrollHeight
       }, [items, live])
+
+      const onScroll = () => {
+        const node = scrollRef.current
+        if (node === null) return
+        followRef.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 48
+      }
 
       const stop = React.useCallback(() => {
         const controller = abortRef.current
@@ -889,6 +979,8 @@ window.__ModuleLoader__.load({
         setError(null)
         setBusy(true)
         const askedAt = Date.now()
+        // 新提问把视图拉回尾部跟着走（用户此刻的意图就是看这一问）
+        followRef.current = true
         setLive({ question, text: '', reasoning: '', askedAt })
         const controller = new AbortController()
         abortRef.current = controller
@@ -949,8 +1041,10 @@ window.__ModuleLoader__.load({
           setBusy(false)
           setLive(null)
           if (failure !== undefined) setError(failure)
-          // 中断时保留已生成的部分：它已经看得见，扔掉反而奇怪。
-          if (answer.trim().length > 0) {
+          // 只要产生过任何内容（正文或思考）就把这一轮留下。
+          // 旧条件只看正文：模型只出思考、没出正文（或中途失败/被停）时，这一轮会
+          // setLive(null) 之后既不在 live 也不在 items —— 提问和思考过程整轮凭空消失。
+          if (answer.trim().length > 0 || reasoning.trim().length > 0) {
             const clean = sanitizeAnswer(answer).text
             // 思考/用量一起留下，落定后思考行与用量行仍然在
             setItems((previous) => [...previous, { question, answer: clean, reasoning, stats, askedAt }].slice(-THREAD_LIMIT))
@@ -983,47 +1077,41 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const turnOf = (item, key, streaming, isLast) => {
-        const answer = sanitizeAnswer(item.answer, streaming === true)
-        return React.createElement('div', {
-          className: 'dshbtw-turn',
-          'data-last': isLast === true ? '1' : undefined,
-          key,
-        },
-          React.createElement('div', { className: 'dshbtw-userRow' },
-            React.createElement('div', { className: 'dshbtw-bubble' }, item.question),
-            React.createElement(UserActions, {
-              text: item.question,
-              at: item.askedAt !== undefined ? item.askedAt : (item.stats === undefined || item.stats === null ? undefined : item.stats.startedAt),
-              t,
-            })),
-          item.reasoning === undefined || item.reasoning === ''
-            ? null
-            : React.createElement(ReasoningRow, { text: item.reasoning, running: streaming === true, t }),
-          answer.text === ''
-            ? null
-            : React.createElement(React.Fragment, null,
-              React.createElement('div', { className: 'dshbtw-answer' }, markdown(answer.text, false, t)),
-              React.createElement(AnswerActions, { text: answer.text, stats: item.stats, t })))
-      }
-
       const streaming = live === null
         ? null
-        : turnOf({
-          question: live.question,
-          answer: live.text,
-          reasoning: live.reasoning,
-          stats: live.stats,
-          askedAt: live.askedAt,
-        }, 'live', false, true)
+        : React.createElement(Turn, {
+          key: 'live',
+          streaming: true,
+          isLast: true,
+          t,
+          onToggle: unpin,
+          item: {
+            question: live.question,
+            answer: live.text,
+            reasoning: live.reasoning,
+            stats: live.stats,
+            askedAt: live.askedAt,
+          },
+        })
       const empty = items.length === 0 && live === null
         ? React.createElement('div', { className: 'dshbtw-empty' }, t('empty.hint'))
         : null
 
+      // 渲染兜底：任何一处渲染抛错都只显示一行错误，不让整个 tab 变白板；
+      // resetKey 随内容变化，出错后下一次内容更新会自动重试。
+      const resetKey = `${items.length}:${live === null ? '-' : `${live.text.length}/${live.reasoning.length}`}:${draft === '' ? 0 : 1}`
       return React.createElement('div', { className: 'dshbtw-root' },
-        React.createElement('div', { className: 'dshbtw-scroll', ref: scrollRef },
+        React.createElement(BodyBoundary, { resetKey, t },
+        React.createElement('div', { className: 'dshbtw-scroll', ref: scrollRef, onScroll },
           empty,
-          items.map((item, index) => turnOf(item, index, false, live === null && index === items.length - 1)),
+          items.map((item, index) => React.createElement(Turn, {
+            key: index,
+            item,
+            streaming: false,
+            isLast: live === null && index === items.length - 1,
+            t,
+            onToggle: unpin,
+          })),
           streaming),
         error === null ? null : React.createElement('div', { className: 'dshbtw-error' }, error),
         React.createElement('div', { className: 'dshbtw-composer' },
@@ -1068,7 +1156,7 @@ window.__ModuleLoader__.load({
                     'aria-label': t('action.send'),
                     disabled: draft.trim() === '' || sessionId === undefined,
                     onClick: () => { void ask() },
-                  }, React.createElement(IconSend, {})))))))
+                  }, React.createElement(IconSend, {}))))))))
     }
 
     // ------------------------------------------------------------------ 插件

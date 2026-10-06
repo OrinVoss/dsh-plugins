@@ -341,7 +341,9 @@ module.exports = {
       send(res, { type: 'usage', usage, startedAt, endedAt })
 
       if (failure !== undefined) send(res, { type: 'error', message: failure })
-      if (answer.trim().length > 0) {
+      // 只要产生过正文或思考就留下这一轮：只出思考、没出正文时若丢弃，
+      // 客户端 setLive(null) 之后整轮（提问 + 思考）会凭空消失。
+      if (answer.trim().length > 0 || reasoning.trim().length > 0) {
         // 思考/用量一并留在内存线程里：否则一轮结束、思考行与用量行就从面板里消失了。
         // 重放给模型时只用 answer，不要把 reasoning 再喂回去。
         thread.push({ question, answer, reasoning, usage, startedAt, endedAt })
