@@ -479,7 +479,7 @@ This file changed after it was loaded. Use the following content instead of the 
 | `maxBlockBytes: 8192` | 每次重注入的份量变小 | 索引不全，需检索补足 |
 | 把写记忆集中在会话开头 | 天然只有 1–2 次重注入 | 靠习惯 |
 
-## 12. 自动提交（`autoCommit`）
+## 13. 自动提交（`autoCommit`）
 
 `memory_write` / `memory_forget` / 设置页保存与删除落盘后，会在记忆根跑一次
 `git add -A && git commit -m "<作用域>：<条目路径>"` —— **只本地 commit，从不 push**。
@@ -492,7 +492,7 @@ This file changed after it was loaded. Use the following content instead of the 
 在工具回执里说明，**绝不让 git 问题挡住"记忆已经写进磁盘"**；没有实际变更（同一条重复写）→
 以 `nothing-to-commit` 正常返回。子进程 stdio 一律 `'ignore'`（DSH 沙箱下用管道捕获输出会 EPERM）。
 
-## 13. 定期维护：lint 守机械，memcheck 提示语义
+## 14. 定期维护：lint 守机械，memcheck 提示语义
 
 记忆库会随会话一直变长。**结构性问题交给 lint，语义问题交给体检**——两者都只读，不写盘：
 
