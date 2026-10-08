@@ -24,6 +24,14 @@ window.__ModuleLoader__.load({
 
     const STYLE_ATTRIBUTE = 'data-plugin-css'
     const STYLE_ID = 'dsh-pet'
+    /**
+     * 模块系统（dsh-client-modules）按 `data-plugin` 给 <style> 记账：装配某个包时把
+     * 当时还没有这个属性的标签统统认领给它，这个包卸载 / 热更时再按属性整批删掉。
+     * 官方包注入时就写上自己；我们的标签在 apply() 里注入（晚于装配），必须显式归属，
+     * 否则会被下一个装配的包认领走，它一热更就带走宠物的整套样式。
+     */
+    const STYLE_OWNER_ATTRIBUTE = 'data-plugin'
+    const PLUGIN_ID = 'dsh-pet'
     const STORAGE_KEY = 'dsh-pet:prefs'
     const OVERLAY_CLASS = 'dsh-pet-host'
     const ACTIVITY_URL = '/pet-api/activity'
@@ -514,9 +522,17 @@ window.__ModuleLoader__.load({
 
     function installStyleSheet() {
       if (typeof document === 'undefined') return
-      if (document.querySelector('style[' + STYLE_ATTRIBUTE + '="' + STYLE_ID + '"]') !== null) return
+      const existing = document.querySelector('style[' + STYLE_ATTRIBUTE + '="' + STYLE_ID + '"]')
+      if (existing !== null) {
+        // 早先被别的包误认领过：改回自己名下，免得它热更时把我们的样式一起删掉。
+        if (existing.getAttribute(STYLE_OWNER_ATTRIBUTE) !== PLUGIN_ID) {
+          existing.setAttribute(STYLE_OWNER_ATTRIBUTE, PLUGIN_ID)
+        }
+        return
+      }
       const tag = document.createElement('style')
       tag.setAttribute(STYLE_ATTRIBUTE, STYLE_ID)
+      tag.setAttribute(STYLE_OWNER_ATTRIBUTE, PLUGIN_ID)
       tag.textContent = CSS
       document.head.appendChild(tag)
     }

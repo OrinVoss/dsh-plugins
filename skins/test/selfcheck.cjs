@@ -39,7 +39,26 @@ function makeReact() {
   return react
 }
 
-function makeDom() {
+function makeElement(tagName) {
+  const attributes = new Map()
+  return {
+    tagName,
+    attributes,
+    textContent: '',
+    setAttribute(name, value) {
+      attributes.set(name, value)
+    },
+    removeAttribute(name) {
+      attributes.delete(name)
+    },
+    getAttribute(name) {
+      return attributes.has(name) ? attributes.get(name) : null
+    }
+  }
+}
+
+// preexisting 用来模拟「标签已经在文档里（可能被别的包认领过）」这一种重启场景。
+function makeDom(preexisting) {
   const attributes = new Map()
   const body = {
     setAttribute(name, value) {
@@ -52,18 +71,24 @@ function makeDom() {
       return attributes.has(name) ? attributes.get(name) : null
     }
   }
-  const head = { appendChild() {} }
+  const head = {
+    children: [],
+    appendChild(element) {
+      head.children.push(element)
+    }
+  }
   const document = {
     body,
     head,
-    querySelector() {
-      return null
+    querySelector(selector) {
+      if (preexisting === undefined) return null
+      return selector === 'style[data-plugin-css="dsh-skins"]' ? preexisting : null
     },
-    createElement() {
-      return { setAttribute() {}, textContent: '' }
+    createElement(tagName) {
+      return makeElement(tagName)
     }
   }
-  return { document, attributes }
+  return { document, attributes, head }
 }
 
 function makeStorage(seed) {
@@ -76,8 +101,8 @@ function makeStorage(seed) {
   }
 }
 
-function loadBundle(storageSeed) {
-  const dom = makeDom()
+function loadBundle(storageSeed, preexistingStyle) {
+  const dom = makeDom(preexistingStyle)
   const storage = makeStorage(storageSeed)
   const win = {
     localStorage: storage,
@@ -367,7 +392,31 @@ walk(morandiTree, (node) => {
 })
 ok(clicked && rowRun.state.provided.skins.get() === 'morandi', '点「莫兰迪」方块能切到该皮肤')
 
-// ---------- 7. 对比度 ----------
+// ---------- 7. 样式标签归属 ----------
+section('样式标签归属（模块系统按 data-plugin 记账）')
+const fresh = loadBundle()
+const freshExports = fresh.spec.factory((name) => (name === 'react' ? makeReact() : null))
+freshExports.apply(makeCtx().ctx)
+const injected = fresh.dom.head.children[0]
+ok(injected !== undefined && injected.getAttribute('data-plugin-css') === 'dsh-skins', '注入的 style 标签带 data-plugin-css="dsh-skins"')
+ok(
+  injected !== undefined && injected.getAttribute('data-plugin') === 'dsh-skins',
+  '注入的 style 标签把自己认在 data-plugin 名下（否则会被邻居包认领，邻居热更时连样式一起删掉）'
+)
+ok(
+  injected !== undefined && String(injected.textContent).indexOf('.dsh-skins-cube') !== -1,
+  '样式表内容包含设置行样式（.dsh-skins-cube）'
+)
+const stolen = makeElement('style')
+stolen.setAttribute('data-plugin-css', 'dsh-skins')
+stolen.setAttribute('data-plugin', 'dsh-neighbour')
+const repair = loadBundle(undefined, stolen)
+const repairExports = repair.spec.factory((name) => (name === 'react' ? makeReact() : null))
+repairExports.apply(makeCtx().ctx)
+ok(stolen.getAttribute('data-plugin') === 'dsh-skins', '被别的包误认领过的标签会被改回自己名下')
+ok(repair.dom.head.children.length === 0, '标签已存在时不再重复注入')
+
+// ---------- 8. 对比度 ----------
 section('对比度（浅色/深色 × 皮肤）')
 const PAIRS = [
   ['textPrimary', 'canvas', 7, '正文 / 画布'],

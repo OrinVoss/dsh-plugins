@@ -34,6 +34,17 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-skins'
     const STORAGE_KEY = 'dsh-skins:active'
     const OVERRIDE_SOURCE = 'dsh-skins'
+    /**
+     * 模块系统（dsh-client-modules）按 `data-plugin` 给 <style> 记账：装配某个包时，
+     * 把当时还没有这个属性的标签统统认领给它（claimStyles），这个包被卸载或热更时
+     * 再按属性整批 remove()（removeOwnedStyles）。官方包都在注入时就写上自己。
+     *
+     * 我们的标签是在 apply() 里注入的——晚于装配，所以必须是显式归属：否则会被
+     * 下一个装配的包认领走，那个包一热更，皮肤材质 + 设置行样式就被连带删掉
+     * （表现：皮肤方块退化成默认按钮，没有色点、没有选中态、每行按内容宽度排）。
+     */
+    const STYLE_OWNER_ATTRIBUTE = 'data-plugin'
+    const PLUGIN_ID = 'dsh-skins'
 
     /* ---------------------------------------------------------------------
      * 1. 槽位 → 别名 token
@@ -1033,11 +1044,20 @@ window.__ModuleLoader__.load({
       '.dsh-skins-font{color:var(--dsw-alias-label-caption);font-size:12px;line-height:18px}'
     ].join('\n')
 
-    /** 把设置行样式与各皮肤自带的材质 css 一次性注入（幂等）。 */
+    /** 把设置行样式与各皮肤自带的材质 css 一次性注入（幂等，且会把标签认回自己名下）。 */
     function installStyleSheet() {
-      if (typeof document === 'undefined' || document.querySelector('style[' + STYLE_ATTRIBUTE + '="' + STYLE_ID + '"]') !== null) return
+      if (typeof document === 'undefined') return
+      const existing = document.querySelector('style[' + STYLE_ATTRIBUTE + '="' + STYLE_ID + '"]')
+      if (existing !== null) {
+        // 早先被别的包误认领过：改回自己名下，免得它热更时把我们的样式一起删掉。
+        if (existing.getAttribute(STYLE_OWNER_ATTRIBUTE) !== PLUGIN_ID) {
+          existing.setAttribute(STYLE_OWNER_ATTRIBUTE, PLUGIN_ID)
+        }
+        return
+      }
       const tag = document.createElement('style')
       tag.setAttribute(STYLE_ATTRIBUTE, STYLE_ID)
+      tag.setAttribute(STYLE_OWNER_ATTRIBUTE, PLUGIN_ID)
       tag.textContent = ROW_CSS + '\n' + SKINS.map((skin) => skin.css || '').join('\n')
       document.head.appendChild(tag)
     }
