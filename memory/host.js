@@ -575,9 +575,12 @@ function applyHttp(ctx, store, cfg) {
   const RETRIEVE = {
     k: Number.isFinite(retrieveCfg.k) && retrieveCfg.k > 0 ? Math.floor(retrieveCfg.k) : 3,
     minScore: Number.isFinite(retrieveCfg.minScore) ? retrieveCfg.minScore : 8,
-    maxBytes: Number.isFinite(retrieveCfg.maxBytes) && retrieveCfg.maxBytes > 0 ? Math.floor(retrieveCfg.maxBytes) : 2000
+    maxBytes: Number.isFinite(retrieveCfg.maxBytes) && retrieveCfg.maxBytes > 0 ? Math.floor(retrieveCfg.maxBytes) : 2000,
+    // 同一条目多久之后允许再次注入（按 step 计）。会话内永久去重是错的：DSH 会压缩长会话，
+    // 几十轮前注入的条目可能已不在上下文里，却仍被永久抑制（2026-10-09 实测遇到）。
+    repeatAfterSteps: Number.isFinite(retrieveCfg.repeatAfterSteps) && retrieveCfg.repeatAfterSteps >= 0 ? Math.floor(retrieveCfg.repeatAfterSteps) : 15
   }
-  const injectedBySession = new Map()
+  const injectedBySession = new Map()   // sessionId → Map<target, 注入时的 step>
   const INJECT_LOG = require('node:path').join(require('node:os').tmpdir(), 'dsh-memory-l1.log')
   const logInject = (o) => {
     if (retrieveCfg.log === false) return
@@ -598,7 +601,11 @@ function applyHttp(ctx, store, cfg) {
           const header = (payload.agent && payload.agent.session && payload.agent.session.header) || {}
           const sessionId = header.id || 'default'
           const cwd = header.cwd || null
-          const seen = injectedBySession.get(sessionId) || new Set()
+          const stepNo = Number.isFinite(payload.step) ? payload.step : 0
+          const injectedMap = injectedBySession.get(sessionId) || new Map()
+          // 窗口去重：只在最近 repeatAfterSteps 步内注入过的才算"已见过"
+          const seen = new Set()
+          for (const [tg, st] of injectedMap) if (stepNo - st < RETRIEVE.repeatAfterSteps) seen.add(tg)
           const groups = []
           if (cwd) { try { groups.push(store.search('project', query, cwd, RETRIEVE.k)) } catch (_) { /* 无项目库 */ } }
           try { groups.push(store.search('global', query, null, RETRIEVE.k)) } catch (_) { /* 库不可用 */ }
@@ -607,9 +614,9 @@ function applyHttp(ctx, store, cfg) {
             logInject({ ev: 'no-hit', sessionId, query: query.slice(0, 120) })
             return decision
           }
-          for (const p of picked.picked) seen.add(p.target)
+          for (const p of picked.picked) injectedMap.set(p.target, stepNo)
           if (injectedBySession.size > 50) injectedBySession.delete(injectedBySession.keys().next().value)
-          injectedBySession.set(sessionId, seen)
+          injectedBySession.set(sessionId, injectedMap)
           const text = retrieve.renderInjection(picked.picked)
           // 消息形状与 DSH 自己的用户轮消息同构（实测 agent/inbox/spliced 里就是 {content:[{type,text}]}）
           const injected = { content: [{ type: 'text', text }] }
@@ -648,3 +655,5 @@ module.exports = {
 
 // 2026-10-09：L0 分层注入（blockMode: layered）+ 工作区记忆区块 + L1 检索注入
 // （agent/pre-step；需要 inject 里声明 'agents'）。改完 lib/*.js 后碰一下本文件即可重挂载。
+// remount #11 (window dedupe)
+// remount #12 (fix dup const)
