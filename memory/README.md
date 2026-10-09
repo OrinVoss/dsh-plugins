@@ -29,7 +29,15 @@ DSH 原本没有记忆功能：会话日志只是历史记录，`AGENTS.md` 只�
     └── <条目>.md
 ```
 
-工作区键 = `<目录名 slug>-<规范化 cwd 的 sha1 前 16 位>`，例如 `deepseek-harness-71e9342bec5e8de1`——和 Z code 的 `projects/paper-71e9342bec5e8de1` 同一套规则。
+工作区键 = `<目录名 slug>-<规范化 cwd 的 sha1 前 16 位>`。
+
+规则细节（与 Z code 的 `projects/<slug>-<hash>` **同一套规则**，但哈希随路径而变，不是同一个值）：
+`path.resolve(cwd)` → 反斜杠转 `/` → 去掉尾部 `/` → **转小写** → sha1 → 取前 16 位十六进制；
+slug 由目录名小写、非 `[a-z0-9\u4e00-\u9fa5._-]` 的字符一律换成 `-` 得到。
+
+本机实例：本工作区 `D:\桌面\编程作品\马具对比\DeepSeek Harness` → `deepseek-harness-e9b7a1e936a10df7`
+（`~/.dsh/memory/projects/` 下另有两个：`测试-aed73870c10edae0`、`ai教学-36df60ec49a8de76`）。
+想知道某个目录的键，直接调 `store.projectKey(cwd)`，别手算。
 
 条目文件格式（与 Z code 相同，可双向互认）：
 
@@ -226,6 +234,13 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
 | `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
 | `autoCommit` | `true` | 落盘后把记忆库**本地提交**一次（`git add -A && git commit`，**从不 push**）。home 不是 git 仓库时静默跳过；任何 git 失败都吞掉、不影响记忆写入。stdio 用 `ignore`（沙箱下管道捕获子进程输出会 EPERM）。设 `false` 关掉 |
+| `injectProjectBlock` | `true` | 是否按工作区把**项目记忆索引**写进 `<cwd>/AGENTS.local.md` 的托管区块（见 §12.1） |
+| `projectBlockFile` | `AGENTS.local.md` | 工作区块写进哪个文件（与全局的 `agentsPath` 分开） |
+| `maxProjectBlockBytes` | `8192` | 工作区块的字节预算 |
+| `blockMode` | `layered` | `layered` = 分层区块（头部 + 触发规则 + 规则速查 + 专题地图，见 §12.1）；`full` = 旧行为（逐条索引全量）。**这是 L0 的一键回滚开关** |
+| `triggerLines` | 内置 5 条 | 「动手前先查记忆」那几条触发规则；给了就**整体覆盖**内置默认 |
+| `sectionHints` | 内置 5 组 | 专题地图每行后面的关键词提示（按分组名覆盖）。内置默认是刻意的——**本文件只在应用启动时读**，写在这里的新键要重启才生效，内置默认保证「改完代码即生效」 |
+| `retrieve` | 见下 | L1 检索注入（见 §12.2）。子字段：`enabled`(`true`)、`k`(`3`)、`minScore`(`8`)、`maxBytes`(`2000`)、`minQueryChars`(`4`，查询有效长度不足就不注入)、`repeatAfterSteps`(`60`，兜底去重窗口)、`clearOnCompaction`(`true`)、`log`(`true`)。`enabled: false` 是 L1 的一键回滚开关 |
 
 ## 6. 从 Z code 导入已有记忆
 
@@ -510,15 +525,22 @@ L0 把逐条索引换成了规则 + 地图，代价是"细节要靠模型自己�
   既省 token 也让前缀保持稳定。
 - **流程**：取本轮用户消息（剥掉 `<system-reminder>` 与指令块）→ `search(project)` + `search(global)`
   → `lib/retrieve.js` 的 `pickHits` 按 `k/minScore/maxBytes/seen` 挑 → `renderInjection` 渲染 →
-  以 `{content:[{type:"text",text}]}`（与 DSH inbox 用户消息同构）追加到本轮消息。
+  以 `{content:[{type:"text",text}], source:{kind:"dsh-memory-retrieval", form:"retrieval", changes:[]}}`
+  追加到本轮消息。**`source` 不能省**：只给 `{content:[...]}` 会让框架去读 `message.source.kind`，
+  抛 `Cannot read properties of undefined (reading 'kind')`、**整轮直接崩掉**（2026-10-09 实测踩到，
+  那条提问因此没被收到）。自定义 `kind` 是可行的——官方团队插件用 `kind:"team-message"`。
 - **三条硬约束**（都是为了不破坏前缀缓存，实测缓存命中率 96.9%、前缀可达 20 万 token）：
   ①只追加，绝不改写/删除已注入消息；②内容确定性；③同一条目不反复注入。
 - **去重的主触发器是「压缩」而不是步数**：DSH 会压缩长会话，`compaction/prune` 会把消息 **shadow** 掉
-  （实测本会话 15 个压缩事件、prune 落在 seq 23/29/36/48），那条「我送过了」的内容可能已不在上下文里。
+  （实测某会话 15 个压缩事件、prune 落在 seq 23/29/36/48），那条「我送过了」的内容可能已不在上下文里。
   所以 `host.js` 监听 `session/event`：收到 `compaction/end` / `compaction/prune` 就**清空该会话的注入记账**，
   下一次用户轮次重新可注入。`repeatAfterSteps`（默认 60）只是兜底窗口，防止「没压缩但会话极长」时反复注入。
   `clearOnCompaction: false` 可关掉压缩触发。
-- **配置**：`retrieve: {enabled, k, minScore, maxBytes, log}`（默认 3 / 8 / 2000 / 开）。
+- **精确补送**：注入消息在会话日志里是 `user/message` 事件、带自己的 `seq` 与上面的 `source.kind`，
+  所以能靠 `source.kind` 认出来；`compaction/prune` 又带 `shadowedSeqs`（被遮掉的消息 seq）→
+  两者比对，**只把确实被遮掉的那几条原文重送**（原文复用＝确定性，不必再读库）。
+  日志里对应 `injection-seq-recorded` / `injection-shadowed` / `restore-after-compaction`。
+- **配置**：`retrieve: {enabled, k, minScore, maxBytes, minQueryChars, repeatAfterSteps, clearOnCompaction, log}`。
   `enabled: false` 只关 L1；`blockMode: full` 只关 L0——两级都能单独回滚。
 - **降级**：钩子注册失败或本轮异常 → 记 warn 并原样返回，L0 照常工作。
 - **注入日志**：`%LOCALAPPDATA%\Temp\dsh-memory-l1.log`（每次用户轮记 `no-hit` 或 `inject`+targets），
