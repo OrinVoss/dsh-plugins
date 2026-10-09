@@ -512,7 +512,12 @@ L0 把逐条索引换成了规则 + 地图，代价是"细节要靠模型自己�
   → `lib/retrieve.js` 的 `pickHits` 按 `k/minScore/maxBytes/seen` 挑 → `renderInjection` 渲染 →
   以 `{content:[{type:"text",text}]}`（与 DSH inbox 用户消息同构）追加到本轮消息。
 - **三条硬约束**（都是为了不破坏前缀缓存，实测缓存命中率 96.9%、前缀可达 20 万 token）：
-  ①只追加，绝不改写/删除已注入消息；②内容确定性；③会话内去重（同一条目只注一次）。
+  ①只追加，绝不改写/删除已注入消息；②内容确定性；③同一条目不反复注入。
+- **去重的主触发器是「压缩」而不是步数**：DSH 会压缩长会话，`compaction/prune` 会把消息 **shadow** 掉
+  （实测本会话 15 个压缩事件、prune 落在 seq 23/29/36/48），那条「我送过了」的内容可能已不在上下文里。
+  所以 `host.js` 监听 `session/event`：收到 `compaction/end` / `compaction/prune` 就**清空该会话的注入记账**，
+  下一次用户轮次重新可注入。`repeatAfterSteps`（默认 60）只是兜底窗口，防止「没压缩但会话极长」时反复注入。
+  `clearOnCompaction: false` 可关掉压缩触发。
 - **配置**：`retrieve: {enabled, k, minScore, maxBytes, log}`（默认 3 / 8 / 2000 / 开）。
   `enabled: false` 只关 L1；`blockMode: full` 只关 L0——两级都能单独回滚。
 - **降级**：钩子注册失败或本轮异常 → 记 warn 并原样返回，L0 照常工作。
