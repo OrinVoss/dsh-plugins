@@ -606,16 +606,27 @@ user's long-term memory store. … copy their entry lines (title, `name`, and su
 
 **配置**：`promptInjection: {enabled, sectionOrder, contextOrder}`。
 
-**第二步（2026-10-09 当天完成）—— 文件通道已退休**：
+**第二步（2026-10-09 当天完成并验证）—— 文件通道已退休**：
 
 - `fileBlocksEnabled(ctx, cfg)` 决定文件通道是否生效：**能走系统提示词通道就不写文件**。
   显式 `injectProjectBlock: false` 仍是关闭；`promptInjection.enabled: false` 是**回滚开关**
-  （恢复文件通道，下次启动重写区块）。
+  （恢复文件通道，下次启动重写区块 —— 该配置只在应用启动时读）。
 - 走新通道时，启动的 `sync(null)` 与 L1 钩子首次拿到 cwd 时都会调 `store.stripFileBlocks()`：
   摘掉历史遗留的托管区块，**全局文件若只剩我们写的那行标题就整个删掉**（否则官方加载器每轮还会
   注入一条只有标题的空指令）。
-- 实测：`~/.dsh/AGENTS.md` 被删、session 里出现 "Instructions removed: ~/.dsh/AGENTS.md"；
-  `AGENTS.local.md` 在下次用户轮次由钩子摘掉。
+- **摘工作区文件有前置条件**：只有 `renderProject()` **真的产出过非空文本**（`contextChannelProven`）
+  才允许摘 —— 防"文件摘了、context 又渲染成空"导致工作区索引彻底看不见。
+- **实测（2026-10-09）**：`~/.dsh/AGENTS.md` 删除 → session 报 "Instructions removed"；
+  `AGENTS.local.md` 在下一个用户轮次被钩子删除并记 `stripped-workspace-block{deleted:true}`，
+  同时该工作区索引以 runtime context 形式出现在会话里 ✓。
+
+**排障用的两条探针**（各只记一次，留在代码里，日志在 `%LOCALAPPDATA%\Temp\dsh-memory-l1.log`）：
+
+- `section-text-called`：证明段/context 的 `text` 函数被调用（组装确实发生）；
+- `assembly-context-probe`：把组装上下文的键、`agent` 的键、每条 cwd 候选值都记下来 ——
+  实测组装上下文是 `{agent, scope, signal}`，**本身没有 cwd**，要从 `agent.session.header.cwd` 取；
+  而 cordis 按 inject 门控属性访问，**每条候选必须各自 try**，否则一条抛错就整段返回 null
+  （表现成"渠道静默渲染为空"，极难查）。
 
 ## 13. 自动提交（`autoCommit`）
 
