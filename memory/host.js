@@ -578,8 +578,12 @@ function applyHttp(ctx, store, cfg) {
     maxBytes: Number.isFinite(retrieveCfg.maxBytes) && retrieveCfg.maxBytes > 0 ? Math.floor(retrieveCfg.maxBytes) : 2000,
     // 同一条目多久之后允许再次注入（按 step 计）。会话内永久去重是错的：DSH 会压缩长会话，
     // 几十轮前注入的条目可能已不在上下文里，却仍被永久抑制（2026-10-09 实测遇到）。
-    repeatAfterSteps: Number.isFinite(retrieveCfg.repeatAfterSteps) && retrieveCfg.repeatAfterSteps >= 0 ? Math.floor(retrieveCfg.repeatAfterSteps) : 15
+    repeatAfterSteps: Number.isFinite(retrieveCfg.repeatAfterSteps) && retrieveCfg.repeatAfterSteps >= 0 ? Math.floor(retrieveCfg.repeatAfterSteps) : 60
   }
+  // 压缩后清空注入记账：压缩会把旧消息 shadow 掉（compaction/prune 的 shadowedSeqs），
+  // 那些"我送过了"的内容可能已经不在上下文里 —— 这时必须允许重新送（2026-10-09 实测：
+  // 本会话 15 个压缩事件、prune 落在 seq 23/29/36/48）。
+  const clearOnCompaction = retrieveCfg.clearOnCompaction !== false
   const injectedBySession = new Map()   // sessionId → Map<target, 注入时的 step>
   const INJECT_LOG = require('node:path').join(require('node:os').tmpdir(), 'dsh-memory-l1.log')
   const logInject = (o) => {
@@ -603,9 +607,9 @@ function applyHttp(ctx, store, cfg) {
           const cwd = header.cwd || null
           const stepNo = Number.isFinite(payload.step) ? payload.step : 0
           const injectedMap = injectedBySession.get(sessionId) || new Map()
-          // 窗口去重：只在最近 repeatAfterSteps 步内注入过的才算"已见过"
-          const seen = new Set()
-          for (const [tg, st] of injectedMap) if (stepNo - st < RETRIEVE.repeatAfterSteps) seen.add(tg)
+          // 去重：主触发器是压缩（见下面的 session/event 监听，压缩会清空记账）；
+          // 这里只是兜底窗口，防止"没有压缩但会话很长"时同一内容反复注入。
+          const seen = retrieve.seenWithin(injectedMap, stepNo, RETRIEVE.repeatAfterSteps)
           const groups = []
           if (cwd) { try { groups.push(store.search('project', query, cwd, RETRIEVE.k)) } catch (_) { /* 无项目库 */ } }
           try { groups.push(store.search('global', query, null, RETRIEVE.k)) } catch (_) { /* 库不可用 */ }
@@ -629,7 +633,23 @@ function applyHttp(ctx, store, cfg) {
           return decision
         }
       })
-      ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes)
+      // 压缩事件 → 清空该会话的注入记账（下一次用户轮次重新可注入）
+      if (clearOnCompaction) {
+        ctx.on('session/event', (session, event) => {
+          try {
+            if (!event || typeof event.type !== 'string' || !event.type.startsWith('compaction/')) return
+            if (event.type !== 'compaction/end' && event.type !== 'compaction/prune') return
+            const sid = (session && (session.id || (session.header && session.header.id))) || null
+            if (!sid) return
+            const had = injectedBySession.get(sid)
+            if (had && had.size) {
+              injectedBySession.delete(sid)
+              logInject({ ev: 'dedupe-cleared', sessionId: sid, reason: event.type, dropped: had.size })
+            }
+          } catch (_) { /* 清账失败不影响主流程 */ }
+        })
+      }
+      ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d，压缩后清账=%s）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes, String(clearOnCompaction))
     } catch (err) {
       ctx.logger.warn('dsh-memory: agent/pre-step 不可用，L1 已降级关闭: %o', err)
     }
@@ -657,3 +677,5 @@ module.exports = {
 // （agent/pre-step；需要 inject 里声明 'agents'）。改完 lib/*.js 后碰一下本文件即可重挂载。
 // remount #11 (window dedupe)
 // remount #12 (fix dup const)
+// remount #13 (compaction trigger)
+// remount #14 (brace fix)

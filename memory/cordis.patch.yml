@@ -28,8 +28,10 @@
           k: 3
           minScore: 8
           maxBytes: 2000
-          # 同一条目多少步之后允许再注入（默认 15；会话内永久去重是错的，长会话会被压缩）
-          repeatAfterSteps: 15
+          # 去重：主触发器是「压缩事件」（压缩会把旧消息 shadow 掉，那时必须允许重送）。
+          # clearOnCompaction=false 可关掉；repeatAfterSteps 只是兜底窗口（默认 60）。
+          clearOnCompaction: true
+          repeatAfterSteps: 60
         # 专题地图里每个分组的关键词提示（让模型知道该搜什么）
         sectionHints:
           本机与网络: 代理 10808 / 外网可达性 / 蓝屏 TDR / 内存显存预算 / 麦克风

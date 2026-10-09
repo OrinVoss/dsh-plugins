@@ -899,6 +899,14 @@ check('pickHits 遵守 maxBytes（宁可少注也不超）', () => {
   assert.deepEqual(out.picked.map((x) => x.target), ['g/b.md'], '超预算的那条跳过，后面的仍可入选')
 })
 
+check('seenWithin：窗口内的算已见过，窗口外的过期', () => {
+  const r = require('./lib/retrieve')
+  const injected = new Map([['a.md', 10], ['b.md', 24], ['c.md', 0]])
+  assert.deepEqual([...r.seenWithin(injected, 26, 15)].sort(), ['b.md'], '26-10=16 过期、26-24=2 在窗口内')
+  assert.deepEqual([...r.seenWithin(injected, 26, 0)], [], '窗口 <=0 = 只看压缩，不看窗口')
+  assert.deepEqual([...r.seenWithin(new Map(), 5, 60)], [])
+})
+
 check('renderInjection 确定性、且给出 name 供 memory_read', () => {
   const r = require('./lib/retrieve')
   const picked = [{ target: 'tools/x.md', title: 'X', summary: '摘要' }]

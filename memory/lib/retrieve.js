@@ -26,6 +26,28 @@ function userTurnText(messages) {
   return ''
 }
 
+/**
+ * 从「条目 → 注入时的步号」记账里算出当前哪些算"已见过"。
+ *
+ * 为什么是窗口而不是永久：DSH 会压缩长会话（compaction/prune 会把消息 shadow 掉），
+ * 几十步前注入的内容可能已不在上下文里，永久去重会让知识静默消失。
+ * 主触发器其实是压缩事件（host.js 收到 compaction 就清空记账）；这个窗口只是兜底。
+ * @param {Map<string, number>} injected target → 注入时的步号
+ * @param {number} stepNo 当前步号
+ * @param {number} window 多少步内算"见过"；<=0 表示只看压缩、不看窗口
+ * @returns {Set<string>}
+ */
+function seenWithin(injected, stepNo, window) {
+  const out = new Set()
+  if (!(injected instanceof Map)) return out
+  const w = Number.isFinite(window) ? window : 60
+  if (w <= 0) return out
+  for (const [target, at] of injected) {
+    if (Number.isFinite(at) && stepNo - at < w) out.add(target)
+  }
+  return out
+}
+
 /** 一条注入行的渲染（确定性：只依赖 hit 自身） */
 function line(hit) {
   return `- ${hit.title || hit.target}（\`${hit.target}\`）—— ${hit.summary || ''}`
@@ -70,4 +92,4 @@ function renderInjection(picked) {
   ].join('\n')
 }
 
-module.exports = { userTurnText, pickHits, renderInjection, line }
+module.exports = { userTurnText, pickHits, renderInjection, line, seenWithin }
