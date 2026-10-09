@@ -477,6 +477,9 @@ function readJsonBody(req) {
 function applyInjection(ctx, store, cfg) {
   const fileBlocks = fileBlocksEnabled(ctx, cfg)
   const strippedWorkspaces = new Set()   // 已摘过遗留文件区块的工作区（幂等，只做一次）
+  // 是否已经**真的**产出过非空的工作区上下文文本。只有为真才允许摘掉工作区的文件区块
+  // （否则一旦 runtime context 那条渲染成空，工作区索引就彻底看不见了）。
+  let contextChannelProven = false
   // ---- L1：按当前用户消息检索记忆，只注入命中的几条（2026-10-09）
   // 依据：10 天实测 456 个被注入会话里 86.2% 从未用过记忆工具；48 条从未被读的条目里 41 条主题
   // 在会话里出现过（投递失败）。所以把"模型自己想起来搜"换成"相关记忆自动出现"。
@@ -544,8 +547,14 @@ function applyInjection(ctx, store, cfg) {
           const header = (payload.agent && payload.agent.session && payload.agent.session.header) || {}
           const sessionId = header.id || 'default'
           const cwd = header.cwd || null
-          // 文件通道已退休：本会话第一次拿到 cwd 时，摘掉该工作区历史遗留的托管区块（幂等，每 cwd 一次）
-          if (!fileBlocks && cwd && !strippedWorkspaces.has(cwd)) {
+          // 记下会话 cwd 作兜底：组装上下文（{agent,scope}）里取 cwd 要过 cordis 的属性门控，
+          // 未必取得出来；这里是最可靠的来源（L1 钩子能正常按它检索项目库）。
+          if (cwd) globalThis.__dshMemoryLastCwd = cwd
+          // 文件通道已退休：本会话第一次拿到 cwd 时，摘掉该工作区历史遗留的托管区块（幂等，每 cwd 一次）。
+          // **但要等 context 通道被证明产出过非空内容**（contextChannelProven）—— 否则一旦摘了文件、
+          // runtime context 那条又渲染成空（组装上下文里取不到 cwd），工作区索引就彻底看不见了。
+          // 全局那条不受此限：系统提示词段已验证生效，所以全局文件已经安全删掉。
+          if (!fileBlocks && contextChannelProven && cwd && !strippedWorkspaces.has(cwd)) {
             strippedWorkspaces.add(cwd)
             try {
               const r = store.stripFileBlocks(cwd)
@@ -690,30 +699,39 @@ function applyInjection(ctx, store, cfg) {
       const MARKERS = new Set([storeLib.BLOCK_BEGIN, storeLib.BLOCK_END, storeLib.PROJECT_BLOCK_BEGIN, storeLib.PROJECT_BLOCK_END])
       const stripMarkers = (t) => String(t || '').split('\n').filter((l) => !MARKERS.has(l.trim())).join('\n').trim()
       // 组装上下文是 { agent, scope, signal? }，**本身没有 cwd** —— 要从 agent 上取。
-      // 多写几条路径兜底，并记一条（节流）诊断，确认到底取到没有。
-      // 注意：**不要往上下文对象上写标记**（它可能是冻结的，写会抛错并被自己的 catch 吞掉）。
+      // 关键（2026-10-09 实测踩到）：**每一条候选都要单独 try**。cordis 按 inject 门控属性访问，
+      // 某一路（如 a.session）会抛错；如果整个函数一个大 try，一条抛错就把后面的候选和探针全跳过，
+      // 表现为"探针不触发 + 渠道渲染成空文本"，很难看出真正原因。
       let lastCtxProbe = 0
       const cwdOf = (c) => {
+        const safe = (fn) => { try { return fn() } catch (_) { return undefined } }
+        const cands = [
+          safe(() => c && c.agent && c.agent.session && c.agent.session.header && c.agent.session.header.cwd),
+          safe(() => c && c.agent && c.agent.session && c.agent.session.cwd),
+          safe(() => c && c.scope && c.scope.session && c.scope.session.header && c.scope.session.header.cwd),
+          safe(() => c && c.agent && c.agent.cwd),
+          safe(() => c && c.agent && c.agent.options && c.agent.options.cwd),
+          safe(() => c && c.cwd),
+          safe(() => globalThis.__dshMemoryLastCwd)   // L1 钩子里记下的会话 cwd（兜底）
+        ]
+        const hit = cands.find((x) => typeof x === 'string' && x && !x.includes('dsh-h')) || null
         try {
-          const a = c && c.agent
-          const cands = [
-            a && a.session && a.session.header && a.session.header.cwd,
-            a && a.session && a.session.cwd,
-            a && a.cwd,
-            a && a.options && a.options.cwd,
-            c && c.cwd
-          ]
-          const hit = cands.find((x) => typeof x === 'string' && x)
-          try {
-            const now = Date.now()
-            if (now - lastCtxProbe > 5000) {
-              lastCtxProbe = now
-              const safeKeys = (o) => { try { return o ? Object.keys(o).slice(0, 16).join(',') : '(none)' } catch (e) { return 'THROW' } }
-              logInject({ ev: 'assembly-context-probe', ctxType: typeof c, keys: safeKeys(c), agentKeys: safeKeys(a), cwd: hit || '(none)' })
-            }
-          } catch (_) { /* 探针不许影响主流程 */ }
-          return hit || null
-        } catch (_) { return null }
+          const now = Date.now()
+          if (now - lastCtxProbe > 5000) {
+            lastCtxProbe = now
+            const safeKeys = (o) => { try { return o ? Object.keys(o).slice(0, 20).join(',') : '(none)' } catch (e) { return 'THROW' } }
+            logInject({
+              ev: 'assembly-context-probe',
+              ctxType: typeof c,
+              keys: safeKeys(c),
+              agentKeys: safeKeys(safe(() => c && c.agent)),
+              scopeKeys: safeKeys(safe(() => c && c.scope)),
+              cands: cands.map((x) => (typeof x === 'string' ? x : String(x))),
+              cwd: hit || '(none)'
+            })
+          }
+        } catch (_) { /* 探针不许影响主流程 */ }
+        return hit
       }
       const TTL = 5000
       let blockCache = { text: '', at: 0 }
@@ -731,6 +749,8 @@ function applyInjection(ctx, store, cfg) {
         if (hit && now - hit.at < TTL) return hit.text
         let text = ''
         try { text = stripMarkers(store.buildProjectBlock(cwd)) } catch (_) { text = '' }
+        // 证据标志：只要真的产出过非空的工作区文本，才允许摘掉该工作区的文件区块（见 L1 钩子里的判断）
+        if (text) contextChannelProven = true
         projCache.set(cwd, { text, at: now })
         if (projCache.size > 20) projCache.clear()
         return text
@@ -738,16 +758,24 @@ function applyInjection(ctx, store, cfg) {
       invalidatePromptCache = () => { blockCache = { text: '', at: 0 }; projCache = new Map() }
       const sectionOrder = Number.isFinite(promptCfg.sectionOrder) ? promptCfg.sectionOrder : 10250
       const contextOrder = Number.isFinite(promptCfg.contextOrder) ? promptCfg.contextOrder : 200
+      // 无歧义标记：证明 text 函数到底有没有被调用（探针挂在 cwdOf 里，一有异常就看不到了）
+      let lastCalledProbe = 0
+      const calledProbe = (which) => {
+        try {
+          const now = Date.now()
+          if (now - lastCalledProbe > 5000) { lastCalledProbe = now; logInject({ ev: 'section-text-called', which }) }
+        } catch (_) { /* 探针不许影响主流程 */ }
+      }
       ctx.systemPrompt.section({
         name: 'dsh-memory:index',
         order: sectionOrder,
         interpolate: false,
-        text: (c) => renderGlobal(cwdOf(c))
+        text: (c) => { calledProbe('section'); return renderGlobal(cwdOf(c)) }
       })
       ctx.systemPrompt.context({
         name: 'dsh-memory:project',
         order: contextOrder,
-        text: (c) => renderProject(cwdOf(c))
+        text: (c) => { calledProbe('context'); return renderProject(cwdOf(c)) }
       })
       logInject({ ev: 'prompt-injection-registered', sectionOrder, contextOrder, bytes: Buffer.byteLength(renderGlobal(null), 'utf8') })
     } catch (err) {
@@ -951,3 +979,7 @@ module.exports = {
 // remount #31 (cwd probe)
 // remount #32 (throttled cwd probe)
 // remount #33 (file channel retired)
+// remount #34 (per-property cwd probe)
+// remount #35 (called probe)
+// remount #36 (fix contextChannelProven)
+// remount #37
