@@ -20,6 +20,14 @@
         # L0 注入形态：layered = 规则速查 + 专题地图（默认，2026-10-09 起）；
         # full = 逐条摘要（旧行为，改这一行即可一键回滚）。
         blockMode: layered
+        # L1 检索注入：每次用户轮次按消息内容检索记忆，只注入命中的几条（默认开）。
+        # enabled:false 可单独关掉；k/minScore/maxBytes 调松紧；log:false 关掉注入日志。
+        # 注意：本文件只在应用启动时读；这里的值只是"文档 + 覆盖"，默认值在代码里（改完即生效）。
+        retrieve:
+          enabled: true
+          k: 3
+          minScore: 8
+          maxBytes: 2000
         # 专题地图里每个分组的关键词提示（让模型知道该搜什么）
         sectionHints:
           本机与网络: 代理 10808 / 外网可达性 / 蓝屏 TDR / 内存显存预算 / 麦克风

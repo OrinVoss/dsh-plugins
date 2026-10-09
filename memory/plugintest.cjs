@@ -225,8 +225,8 @@ check('参数里所有 enum 值都合法', () => {
   assert.ok(tool('memory_write').parameters.properties.type.enum.includes('reference'))
 })
 
-check('inject 声明了 tools、且没有多余依赖', () => {
-  assert.deepEqual(host.inject, ['tools'])
+check('inject 声明了 tools 与 agents（后者用于 agent/pre-step 检索注入）', () => {
+  assert.deepEqual(host.inject, ['tools', 'agents'])
   assert.equal(host.name, 'dsh-memory')
 })
 

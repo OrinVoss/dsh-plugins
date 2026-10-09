@@ -566,12 +566,74 @@ function applyHttp(ctx, store, cfg) {
     return { agentsPath: res.path, changed: res.changed, bytes: res.bytes, workspace: ws }
   }))
 
+  // ---- L1：按当前用户消息检索记忆，只注入命中的几条（2026-10-09）
+  // 依据：10 天实测 456 个被注入会话里 86.2% 从未用过记忆工具；48 条从未被读的条目里 41 条主题
+  // 在会话里出现过（投递失败）。所以把"模型自己想起来搜"换成"相关记忆自动出现"。
+  // 三条硬约束（只追加 / 确定性 / 会话内去重）见 lib/retrieve.js 顶部注释。
+  const retrieveCfg = (cfg.retrieve && typeof cfg.retrieve === 'object') ? cfg.retrieve : {}
+  const retrieveEnabled = retrieveCfg.enabled !== false
+  const RETRIEVE = {
+    k: Number.isFinite(retrieveCfg.k) && retrieveCfg.k > 0 ? Math.floor(retrieveCfg.k) : 3,
+    minScore: Number.isFinite(retrieveCfg.minScore) ? retrieveCfg.minScore : 8,
+    maxBytes: Number.isFinite(retrieveCfg.maxBytes) && retrieveCfg.maxBytes > 0 ? Math.floor(retrieveCfg.maxBytes) : 2000
+  }
+  const injectedBySession = new Map()
+  const INJECT_LOG = require('node:path').join(require('node:os').tmpdir(), 'dsh-memory-l1.log')
+  const logInject = (o) => {
+    if (retrieveCfg.log === false) return
+    try { require('node:fs').appendFileSync(INJECT_LOG, JSON.stringify(Object.assign({ t: new Date().toISOString() }, o)) + '\n') } catch (_) { /* 日志不许影响主流程 */ }
+  }
+
+  if (retrieveEnabled) {
+    try {
+      const retrieve = require('./lib/retrieve')
+      ctx.on('agent/pre-step', async (payload, next) => {
+        const decision = await next()
+        try {
+          const list = Array.isArray(payload && payload.messages) ? payload.messages : []
+          const query = retrieve.userTurnText(list)
+          // 工具续跑步骤没有新用户消息 → 不注入（省 token，也让前缀保持稳定）
+          if (!query) return decision
+          if (!decision || !Array.isArray(decision.messages)) return decision
+          const header = (payload.agent && payload.agent.session && payload.agent.session.header) || {}
+          const sessionId = header.id || 'default'
+          const cwd = header.cwd || null
+          const seen = injectedBySession.get(sessionId) || new Set()
+          const groups = []
+          if (cwd) { try { groups.push(store.search('project', query, cwd, RETRIEVE.k)) } catch (_) { /* 无项目库 */ } }
+          try { groups.push(store.search('global', query, null, RETRIEVE.k)) } catch (_) { /* 库不可用 */ }
+          const picked = retrieve.pickHits(groups, { seen, k: RETRIEVE.k, minScore: RETRIEVE.minScore, maxBytes: RETRIEVE.maxBytes })
+          if (!picked.picked.length) {
+            logInject({ ev: 'no-hit', sessionId, query: query.slice(0, 120) })
+            return decision
+          }
+          for (const p of picked.picked) seen.add(p.target)
+          if (injectedBySession.size > 50) injectedBySession.delete(injectedBySession.keys().next().value)
+          injectedBySession.set(sessionId, seen)
+          const text = retrieve.renderInjection(picked.picked)
+          // 消息形状与 DSH 自己的用户轮消息同构（实测 agent/inbox/spliced 里就是 {content:[{type,text}]}）
+          const injected = { content: [{ type: 'text', text }] }
+          const lastClaimed = decision.messages.findLastIndex((m) => list.includes(m))
+          const at = lastClaimed < 0 ? 0 : lastClaimed + 1
+          logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), query: query.slice(0, 120) })
+          return Object.assign({}, decision, { messages: decision.messages.toSpliced(at, 0, injected) })
+        } catch (err) {
+          try { ctx.logger.warn('dsh-memory: L1 注入失败（本轮跳过）: %o', err) } catch (_) { /* 降级 */ }
+          return decision
+        }
+      })
+      ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes)
+    } catch (err) {
+      ctx.logger.warn('dsh-memory: agent/pre-step 不可用，L1 已降级关闭: %o', err)
+    }
+  }
+
   ctx.logger.info('dsh-memory: 设置页接口已注册（/memory-api/*）')
 }
 
 module.exports = {
   name: 'dsh-memory',
-  inject: ['tools'],
+  inject: ['tools', 'agents'],
   apply(ctx, config) {
     globalThis.__dshMemoryConfig = config
     try {
@@ -584,7 +646,5 @@ module.exports = {
   applyInner
 }
 
-// 2026-10-09：L0 分层注入（blockMode: layered）+ 工作区区块 —— 本行同时让 HMR 重挂载入口。
-// remount #2
-// remount #3
-// remount #4
+// 2026-10-09：L0 分层注入（blockMode: layered）+ 工作区记忆区块 + L1 检索注入
+// （agent/pre-step；需要 inject 里声明 'agents'）。改完 lib/*.js 后碰一下本文件即可重挂载。

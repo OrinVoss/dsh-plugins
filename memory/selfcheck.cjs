@@ -853,6 +853,63 @@ check('always/digest 能穿过 overwrite 往返（不许静默丢字段）', () 
   assert.equal(meta.always, undefined, '显式关掉后不该再写 always')
 })
 
+// ---------------------------------------------------------------- L1 检索注入的纯逻辑
+
+check('userTurnText 取最后一条用户消息，并剥掉注入块', () => {
+  const r = require('./lib/retrieve')
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: '第一轮' }] },
+    { role: 'assistant', content: [{ type: 'text', text: '回答' }] },
+    { role: 'user', content: [{ type: 'text', text: '<system-reminder>注入的索引</system-reminder>帮我做个 PPT' }] }
+  ]
+  assert.equal(r.userTurnText(messages), '帮我做个 PPT')
+})
+
+check('userTurnText 在工具续跑步骤返回空（不注入）', () => {
+  const r = require('./lib/retrieve')
+  assert.equal(r.userTurnText([]), '')
+  assert.equal(r.userTurnText([{ role: 'assistant', content: [{ type: 'text', text: 'x' }] }]), '')
+  assert.equal(r.userTurnText(null), '')
+})
+
+check('pickHits 遵守 k / minScore / seen / 作用域优先级', () => {
+  const r = require('./lib/retrieve')
+  const groups = [
+    { scope: 'project', results: [{ target: 'p/a.md', title: 'A', summary: 's', score: 30 }] },
+    { scope: 'global', results: [
+      { target: 'g/low.md', title: 'L', summary: 's', score: 2 },
+      { target: 'g/b.md', title: 'B', summary: 's', score: 20 },
+      { target: 'g/c.md', title: 'C', summary: 's', score: 18 }
+    ] }
+  ]
+  const out = r.pickHits(groups, { k: 2, minScore: 8 })
+  assert.deepEqual(out.picked.map((x) => x.target), ['p/a.md', 'g/b.md'], '项目优先、低分被挡、k 生效')
+  const out2 = r.pickHits(groups, { k: 3, minScore: 8, seen: new Set(['p/a.md']) })
+  assert.deepEqual(out2.picked.map((x) => x.target), ['g/b.md', 'g/c.md'], 'seen 里的不再注入')
+})
+
+check('pickHits 遵守 maxBytes（宁可少注也不超）', () => {
+  const r = require('./lib/retrieve')
+  const big = '长'.repeat(200)
+  const groups = [{ scope: 'global', results: [
+    { target: 'g/a.md', title: 'A', summary: big, score: 20 },
+    { target: 'g/b.md', title: 'B', summary: '短', score: 19 }
+  ] }]
+  const out = r.pickHits(groups, { k: 3, minScore: 8, maxBytes: 200 })
+  assert.deepEqual(out.picked.map((x) => x.target), ['g/b.md'], '超预算的那条跳过，后面的仍可入选')
+})
+
+check('renderInjection 确定性、且给出 name 供 memory_read', () => {
+  const r = require('./lib/retrieve')
+  const picked = [{ target: 'tools/x.md', title: 'X', summary: '摘要' }]
+  const a = r.renderInjection(picked)
+  const b = r.renderInjection(picked)
+  assert.equal(a, b, "同一输入必须同一输出（前缀缓存友好）")
+  assert.match(a, /tools\/x\.md/)
+  assert.match(a, /memory_read/)
+  assert.equal(r.renderInjection([]), '')
+})
+
 // ---------------------------------------------------------------- 结果
 
 fs.rmSync(root, { recursive: true, force: true })
