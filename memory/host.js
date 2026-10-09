@@ -594,10 +594,34 @@ function applyHttp(ctx, store, cfg) {
   if (retrieveEnabled) {
     try {
       const retrieve = require('./lib/retrieve')
-      ctx.on('agent/pre-step', async (payload, next) => {
+      // applyInner 收到的 ctx 不总是带 .on（实测 "ctx.on is not a function"，会导致钩子静默失效）。
+      // 回退链：ctx.on → ctx.root.on → ctx.app.on；哪个成功记哪个。
+      const pickEmitter = () => {
+        const get = (fn) => { try { return fn() } catch (_) { return undefined } }
+        const cands = [
+          ['ctx', get(() => ctx)],
+          ['ctx.root', get(() => ctx.root)],
+          ['ctx.app', get(() => ctx.app)],
+          ['ctx.scope', get(() => ctx.scope)]
+        ]
+        for (const [label, t] of cands) {
+          try { if (t && typeof t.on === 'function') return { label, t } } catch (_) { /* 取属性也可能抛 */ }
+        }
+        return null
+      }
+      const emitter = pickEmitter()
+      if (!emitter) {
+        let shape = ''
+        try { shape = Object.keys(ctx || {}).slice(0, 25).join(',') } catch (_) { shape = '(取键失败)' }
+        logInject({ ev: 'register-failed', err: 'no-emitter', ctxKeys: shape, hasRoot: !!(ctx && ctx.root) })
+        throw new Error('dsh-memory: 找不到可用的事件发射器（ctx/ctx.root/ctx.app 都没有 .on）')
+      }
+      logInject({ ev: 'emitter', on: emitter.label })
+      emitter.t.on('agent/pre-step', async (payload, next) => {
         const decision = await next()
         try {
           const list = Array.isArray(payload && payload.messages) ? payload.messages : []
+          logInject({ ev: 'enter', step: payload && payload.step, n: list.length })
           const query = retrieve.userTurnText(list)
           // 工具续跑步骤没有新用户消息 → 不注入（省 token，也让前缀保持稳定）
           if (!query) return decision
@@ -635,13 +659,14 @@ function applyHttp(ctx, store, cfg) {
           logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), query: query.slice(0, 120), sourceKind: source.kind, sourceKeys: Object.keys(source) })
           return Object.assign({}, decision, { messages: decision.messages.toSpliced(at, 0, injected) })
         } catch (err) {
+          logInject({ ev: 'error', err: String((err && err.message) || err), stack: String((err && err.stack) || '').slice(0, 400) })
           try { ctx.logger.warn('dsh-memory: L1 注入失败（本轮跳过）: %o', err) } catch (_) { /* 降级 */ }
           return decision
         }
       })
       // 压缩事件 → 清空该会话的注入记账（下一次用户轮次重新可注入）
       if (clearOnCompaction) {
-        ctx.on('session/event', (session, event) => {
+        emitter.t.on('session/event', (session, event) => {
           try {
             if (!event || typeof event.type !== 'string' || !event.type.startsWith('compaction/')) return
             if (event.type !== 'compaction/end' && event.type !== 'compaction/prune') return
@@ -656,7 +681,9 @@ function applyHttp(ctx, store, cfg) {
         })
       }
       ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d，压缩后清账=%s）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes, String(clearOnCompaction))
+      logInject({ ev: 'hook-registered', via: emitter.label, k: RETRIEVE.k, minScore: RETRIEVE.minScore, repeatAfterSteps: RETRIEVE.repeatAfterSteps, clearOnCompaction })
     } catch (err) {
+      logInject({ ev: 'register-failed', err: String((err && err.message) || err) })
       ctx.logger.warn('dsh-memory: agent/pre-step 不可用，L1 已降级关闭: %o', err)
     }
   }
@@ -666,7 +693,7 @@ function applyHttp(ctx, store, cfg) {
 
 module.exports = {
   name: 'dsh-memory',
-  inject: ['tools', 'agents'],
+  inject: ['tools', 'agents', 'sessions', 'sessionProjections'],
   apply(ctx, config) {
     globalThis.__dshMemoryConfig = config
     try {
@@ -687,3 +714,6 @@ module.exports = {
 // remount #14 (brace fix)
 // remount #15 (fix source field)
 // remount #16 (explicit source shape)
+// remount #17 (L1 diagnostics)
+// remount #18 (ctx emitter fallback)
+// remount #19 (inject sessions/sessionProjections)
