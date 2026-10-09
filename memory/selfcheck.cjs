@@ -933,6 +933,27 @@ check('renderInjection 确定性、且给出 name 供 memory_read', () => {
   assert.equal(r.renderInjection([]), '')
 })
 
+// ---------------------------------------------------------------- 防文档漂移
+
+check('cordis.patch.yml 里的配置键都在 README 登记了（防配置漂移）', () => {
+  const yml = fs.readFileSync(path.join(__dirname, 'cordis.patch.yml'), 'utf8')
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8')
+  // 配置块里的顶层键缩进 8 空格（retrieve 的子键缩进 10，不算顶层）
+  const keys = [...yml.matchAll(/^ {8}([A-Za-z][A-Za-z0-9]*):/gm)].map((m) => m[1])
+  assert.ok(keys.length >= 8, '应能解析出配置键，实际 ' + keys.length + ' 个')
+  const missing = keys.filter((k) => !readme.includes('`' + k + '`'))
+  assert.deepEqual(missing, [], 'README §5.3 没登记的配置键：' + missing.join('、'))
+})
+
+check('README 记录的注入消息形状与代码一致（防形状漂移）', () => {
+  const host = fs.readFileSync(path.join(__dirname, 'host.js'), 'utf8')
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8')
+  const kind = /kind: '([a-z0-9-]+)'/.exec(host.split('const source =')[1] || '')
+  assert.ok(kind, '应能从 host.js 里取出注入消息的 source.kind')
+  assert.ok(readme.includes(kind[1]), 'README §12.2 没写出注入的 source.kind：' + kind[1])
+  assert.ok(readme.includes('source'), 'README §12.2 应说明注入消息必须带 source')
+})
+
 // ---------------------------------------------------------------- 结果
 
 fs.rmSync(root, { recursive: true, force: true })
