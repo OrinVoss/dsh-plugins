@@ -143,12 +143,12 @@ cd <包目录>; npm test          # 有 test 脚本的包
 点一下摸头、双击换宠物、按住拖到任意位置、大小 28–200px 可调，颜色跟随皮肤强调色。
 预览见 `pet/preview/`。
 
-**实机截图**：浮层里的小家伙站在界面右边缘（青花瓷皮肤下的小机器人）、设置 → 通用 → 宠物 那一行
-（5 只宠物、大小步进、位置与四个开关），以及插件页卡片。
+**实机截图**：浮层里的小家伙站在界面右边缘（青花瓷皮肤下的小机器人，干活时顶上冒出「干活中…」气泡）、
+设置 → 通用 → 宠物 那一行（5 只宠物、大小步进、位置与四个开关），以及插件页卡片。
 
-| 宠物浮层（实机） | 浮层近景 |
-| --- | --- |
-| <img src="docs/shots/pet-overlay.jpg" width="620"> | <img src="docs/shots/pet-overlay-detail.jpg" width="260"> |
+| 宠物浮层（实机） | 浮层近景 | 对话气泡 |
+| --- | --- | --- |
+| <img src="docs/shots/pet-overlay.jpg" width="420"> | <img src="docs/shots/pet-overlay-detail.jpg" width="210"> | <img src="docs/shots/pet-bubble.jpg" width="210"> |
 
 | 设置里的宠物行 | 插件页卡片 |
 | --- | --- |
@@ -237,6 +237,13 @@ cd <包目录>; npm test          # 有 test 脚本的包
 | <img src="docs/shots/agent-team-plus-card.jpg" width="820"> |
 | --- |
 | 插件页：上限定为 16、多出 `release_teammate` 的本地 fork |
+
+**实机截图**：一次 3 人团队的完整跑通——创建 alpha / bravo / charlie → 等它们跑完并核对结果 →
+用 `release_teammate` 逐个解雇，最后名册只剩 Lead（名额与名字当场可复用）。
+
+| <img src="docs/shots/agent-team-release.jpg" width="820"> |
+| --- |
+| `release_teammate · alpha / bravo / charlie` 连续三次调用后，`list_agents` 回到 1 个智能体 |
 
 ---
 
