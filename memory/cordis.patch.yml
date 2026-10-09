@@ -17,6 +17,16 @@
         injectProjectBlock: true
         projectBlockFile: AGENTS.local.md
         maxProjectBlockBytes: 8192
+        # L0 注入形态：layered = 规则速查 + 专题地图（默认，2026-10-09 起）；
+        # full = 逐条摘要（旧行为，改这一行即可一键回滚）。
+        blockMode: layered
+        # 专题地图里每个分组的关键词提示（让模型知道该搜什么）
+        sectionHints:
+          本机与网络: 代理 10808 / 外网可达性 / 蓝屏 TDR / 内存显存预算 / 麦克风
+          脚本与开发环境: PowerShell/GBK 编码 / VS 构建工具 / 安卓 / 端口排查 / C++ 控制台中文
+          本机 AI 栈（llama.cpp / sd.cpp）: llama.cpp 调参 / CUDA / sd-server / Qwen 出图 / 模型基准与耗时
+          交付物制作技巧: PPT / 网页与单文件 HTML / SVG / 绘本 / 出片与混音 / Blender / 图表 / 验收截图 / 推理题与跑批
+          工具配置: DSH 插件与预设 / kimi-webbridge / kimi-cu / opencode / 沙箱边界 / 会话日志 / 自研仓库
         autoAgentsSync: true
         settingsPage: true
         syncOnStartup: true

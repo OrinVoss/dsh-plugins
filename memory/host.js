@@ -133,7 +133,10 @@ function applyInner(ctx, config) {
     autoCommit: cfg.autoCommit,
     injectProjectBlock: cfg.injectProjectBlock,
     projectBlockFile: cfg.projectBlockFile,
-    maxProjectBlockBytes: cfg.maxProjectBlockBytes
+    maxProjectBlockBytes: cfg.maxProjectBlockBytes,
+    blockMode: cfg.blockMode,
+    sectionHints: cfg.sectionHints,
+    triggerLines: cfg.triggerLines
   })
   const autoSync = cfg.autoAgentsSync !== false
 
@@ -580,3 +583,8 @@ module.exports = {
   },
   applyInner
 }
+
+// 2026-10-09：L0 分层注入（blockMode: layered）+ 工作区区块 —— 本行同时让 HMR 重挂载入口。
+// remount #2
+// remount #3
+// remount #4

@@ -45,6 +45,23 @@ const PROJECT_BLOCK_END = '<!-- dsh-memory-project:end -->'
 const ENTRY_TYPES = ['reference', 'feedback', 'project', 'workflow', 'fact']
 const SCOPES = ['global', 'project']
 const DEFAULT_SECTION = '其他'
+// L0 触发规则的内置默认（可用配置 triggerLines 覆盖）
+// 专题地图关键词的内置默认（配置 sectionHints 可覆盖）。放内置是刻意的：
+// cordis.patch.yml 只在应用启动时读，写在那儿的新键要重启才生效；内置默认保证「改完代码即生效」。
+const DEFAULT_SECTION_HINTS = {
+  '本机与网络': '代理 10808 / 外网可达性 / 蓝屏 TDR / 内存显存预算 / 麦克风',
+  '脚本与开发环境': 'PowerShell/GBK 编码 / VS 构建工具 / 安卓 / 端口排查 / C++ 控制台中文',
+  '本机 AI 栈（llama.cpp / sd.cpp）': 'llama.cpp 调参 / CUDA / sd-server / Qwen 出图 / 模型基准与耗时',
+  '交付物制作技巧': 'PPT / 网页与单文件 HTML / SVG / 绘本 / 出片与混音 / Blender / 图表 / 验收截图 / 推理题与跑批',
+  '工具配置': 'DSH 插件与预设 / kimi-webbridge / kimi-cu / opencode / 沙箱边界 / 会话日志 / 自研仓库'
+}
+const DEFAULT_TRIGGER_LINES = [
+  '- 做 **PPT / 网页 / 单文件 HTML / SVG / 绘本 / 出片 / 混音 / Blender / 图表** → 搜 `PPT`、`网页`、`出片`、`Blender`、`SVG`',
+  '- 碰 **本机环境 / 代理 10808 / 沙箱权限 / 端口进程 / 编码乱码 / 中文路径** → 搜 `沙箱`、`代理`、`编码`',
+  '- 动 **本地模型（llama.cpp / sd.cpp / Qwen 出图 / 评测跑批）** → 搜 `llama.cpp`、`sd.cpp`、`Qwen`、`评测`',
+  '- 写 **DSH 插件 / 预设 / 自研仓库 / kimi 工具** → 搜 `插件`、`预设`、`kimi`',
+  '- 交 **课程作业 / 实验报告** → 搜 `课程`、`作业`'
+]
 
 /** 解析 DSH home：显式 config > $DSH_HOME > ~/.dsh */
 function resolveDshHome(explicit) {
@@ -145,6 +162,12 @@ function serializeEntry(meta, body) {
   if (meta.originSessionId) lines.push(`  originSessionId: ${oneLine(meta.originSessionId)}`)
   lines.push(`  createdAt: ${oneLine(meta.createdAt)}`)
   lines.push(`  updatedAt: ${oneLine(meta.updatedAt)}`)
+  // L0 常驻字段（2026-10-09）：always=true 的条目会在注入区块里按 digest 渲染成一行规则。
+  // 必须在这里显式写回，否则 memory_write(overwrite) 会把它们静默丢掉。
+  if (meta.always === 'true' || meta.always === true) {
+    lines.push('always: true')
+    if (meta.digest) lines.push(`digest: ${oneLine(meta.digest)}`)
+  }
   lines.push('---', '')
   return `${lines.join('\n')}\n${String(body || '').replace(/^\n+/, '').replace(/\s+$/, '')}\n`
 }
@@ -482,6 +505,14 @@ function createStore(options) {
   const maxProjectBlockBytes = Number.isFinite(opts.maxProjectBlockBytes) && opts.maxProjectBlockBytes > 0
     ? Math.floor(opts.maxProjectBlockBytes)
     : 8192
+  // 注入形态：'layered' = 规则速查 + 专题地图（L0，2026-10-09 起默认）；'full' = 逐条摘要（旧行为，可一键回滚）
+  const blockMode = opts.blockMode === 'full' ? 'full' : 'layered'
+  // 分组地图的关键词提示：{ 分组名: "关键词 / 关键词" }
+  const sectionHints = Object.assign({}, DEFAULT_SECTION_HINTS, (opts.sectionHints && typeof opts.sectionHints === 'object') ? opts.sectionHints : {})
+  // 触发规则（动手前先搜）；给了就用给的，否则用内置默认
+  const triggerLines = Array.isArray(opts.triggerLines) && opts.triggerLines.length
+    ? opts.triggerLines.map((s) => String(s))
+    : DEFAULT_TRIGGER_LINES
   const autoCommit = opts.autoCommit !== false
   const commitTimeoutMs = Number.isFinite(opts.commitTimeoutMs) && opts.commitTimeoutMs > 0
     ? Math.floor(opts.commitTimeoutMs)
@@ -658,7 +689,14 @@ function createStore(options) {
       scope: sp.scope,
       originSessionId: input.sessionId ? String(input.sessionId) : (prev && prev.meta.originSessionId) || '',
       createdAt: prev && prev.meta.createdAt ? prev.meta.createdAt : now,
-      updatedAt: now
+      updatedAt: now,
+      // 常驻规则字段：显式传就用传入值，否则沿用旧值（与 originSessionId 同一套约定）
+      always: input.always === undefined
+        ? ((prev && prev.meta.always === 'true') ? 'true' : '')
+        : (input.always === true || input.always === 'true' ? 'true' : ''),
+      digest: input.digest === undefined
+        ? ((prev && prev.meta.digest) || '')
+        : oneLine(input.digest)
     }
     const body = String(input.body == null ? '' : input.body).trim()
     if (!body) return { ok: false, reason: 'empty-body', message: 'memory_write: body 不能为空' }
@@ -847,6 +885,62 @@ function createStore(options) {
 
   // ------------------------------------------------------------ AGENTS.md
 
+  /**
+   * 扫描条目文件，取出标了 `always: true` 的常驻规则（按 digest 渲染成一行）。
+   * 为什么读文件而不是读 INDEX：always/digest 在条目 frontmatter 里，INDEX 只存标题与摘要。
+   * 顺序固定（按 target 排序）——保证同一份库渲染出的区块字节稳定，不破坏前缀缓存。
+   */
+  function alwaysRules() {
+    // 分组顺序：取 INDEX 里各分组首次出现的次序（用户本人 → 偏好 → 学习计划 …），
+    // 保证规则列表按主题成块、且顺序稳定（稳定 = 前缀缓存友好）。
+    const order = new Map()
+    let k = 0
+    for (const e of listIndex('global').entries) {
+      const s = e.section || DEFAULT_SECTION
+      if (!order.has(s)) order.set(s, k++)
+    }
+    const out = []
+    for (const f of allEntryFiles()) {
+      let meta
+      try { meta = parseEntry(readText(f) || '').meta } catch (_) { continue }
+      if (meta.always !== 'true' || !meta.digest) continue
+      // 键必须用**文件相对路径**，不能用 meta.name —— 库里 35 条条目的 name 是叶子名
+      // （如 `git-local-commit-only`），与 INDEX 的 target（`preferences/…`）对不上，
+      // 用它做键会让排序退化成 999、分组排除也失效（2026-10-09 实测踩到）。
+      const rel = path.relative(home, f).replace(/\\/g, '/')
+      out.push({ digest: meta.digest, name: meta.name || '', target: rel })
+    }
+    const secOf = new Map()
+    for (const e of listIndex('global').entries) secOf.set(e.target, e.section || DEFAULT_SECTION)
+    out.sort((a, b) => {
+      const sa = order.has(secOf.get(a.target)) ? order.get(secOf.get(a.target)) : 999
+      const sb = order.has(secOf.get(b.target)) ? order.get(secOf.get(b.target)) : 999
+      return sa - sb || a.target.localeCompare(b.target)
+    })
+    return out
+  }
+
+  /** 专题地图：每个分组一行（分组名 + 条数 + 关键词提示），关键词来自配置 sectionHints。 */
+  function sectionMap(idx) {
+    // 整组都是常驻规则的分组（用户本人 / 偏好 / 学习计划）不进地图——它们在第二节已经逐条列出，
+    // 再列一次既重复又会让"库里有 91 条"这个印象失真。
+    const alwaysTargets = new Set(alwaysRules().map((r) => r.target))
+    const by = new Map()
+    const alwaysBy = new Map()
+    for (const e of idx.entries) {
+      const s = e.section || DEFAULT_SECTION
+      by.set(s, (by.get(s) || 0) + 1)
+      if (alwaysTargets.has(e.target)) alwaysBy.set(s, (alwaysBy.get(s) || 0) + 1)
+    }
+    const out = []
+    for (const [name, count] of by) {
+      if ((alwaysBy.get(name) || 0) === count) continue
+      const hint = sectionHints[name] ? String(sectionHints[name]) : ''
+      out.push(`- **${name}**（${count} 条）${hint ? "—— " + hint : ""}`)
+    }
+    return out
+  }
+
   function buildBlock(cwd) {
     const g = listIndex('global')
     const lines = []
@@ -854,13 +948,39 @@ function createStore(options) {
     lines.push('## 长期记忆库（dsh-memory 自动维护，请勿手改本区块）')
     lines.push('')
     lines.push(`- 记忆根目录：\`${home}\``)
-    lines.push('- 任务涉及本机环境 / 网络 / 工具链 / 用户偏好 / 交付物技巧时，先看下面的全局索引；')
-    lines.push('  需要细节时用 `memory_search`（关键词检索，直接返回正文）或 `memory_read`（按名字精确读），')
-    lines.push('  也可以直接 `read` 索引里给出的相对路径。**不要整库通读。**')
+    if (blockMode === 'layered') {
+      lines.push('- 下面是「每次都要遵守的规则」和「库里有哪些专题」——**绝大多数条目不在这里**；')
+      lines.push('  要细节用 `memory_search`（关键词检索，直接返回正文）或 `memory_read`（按名字精确读）。**不要整库通读。**')
+    } else {
+      lines.push('- 任务涉及本机环境 / 网络 / 工具链 / 用户偏好 / 交付物技巧时，先看下面的全局索引；')
+      lines.push('  需要细节时用 `memory_search`（关键词检索，直接返回正文）或 `memory_read`（按名字精确读），')
+      lines.push('  也可以直接 `read` 索引里给出的相对路径。**不要整库通读。**')
+    }
     lines.push('- 新学到「换项目也成立」的事实 → `memory_write` 且 `scope: "global"`；')
     lines.push('  只对当前工作区成立的 → `scope: "project"`（按会话 cwd 自动归档，不必手填路径）。')
     lines.push('  写入前先 `memory_search` 查重。')
     lines.push('')
+    if (blockMode === 'layered') {
+      // ---- L0：规则速查 + 专题地图。逐条摘要不进上下文，改由 memory_search 按需取。
+      lines.push('### 一、动手前先查记忆（触发规则）')
+      lines.push('')
+      lines.push('遇到下面任何一类，**先 `memory_search` 再开工**（库里有踩坑手册，不查大概率重踩）：')
+      lines.push('')
+      for (const t of triggerLines) lines.push(t)
+      lines.push('')
+      const rules = alwaysRules()
+      if (rules.length) {
+        lines.push('### 二、必须遵守的规则（细节按需搜）')
+        lines.push('')
+        for (const r of rules) lines.push(`- ${r.digest}`)
+        lines.push('')
+      }
+      lines.push('### 三、库里还有什么（专题地图，细节先搜）')
+      lines.push('')
+      for (const m of sectionMap(g)) lines.push(m)
+      lines.push(BLOCK_END)
+      return lines.join('\n')
+    }
     lines.push('### 全局记忆索引')
     lines.push('')
     const headerBytes = Buffer.byteLength(lines.join('\n'), 'utf8')
@@ -1008,6 +1128,8 @@ function createStore(options) {
     forget,
     search,
     buildBlock,
+    alwaysRules,
+    sectionMap,
     buildProjectBlock,
     syncAgents,
     syncWorkspaceAgents,
@@ -1034,6 +1156,8 @@ module.exports = {
   ENTRY_TYPES,
   SCOPES,
   DEFAULT_SECTION,
+  DEFAULT_TRIGGER_LINES,
+  DEFAULT_SECTION_HINTS,
   resolveDshHome,
   slugify,
   projectKey,

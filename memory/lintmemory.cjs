@@ -255,6 +255,19 @@ check('AGENTS.md 托管区块没被预算截断（且余量 > 10%）', () => {
   process.stdout.write(`        （区块 ${bytes}/${budget} 字节，用掉 ${pct.toFixed(0)}%）\n`)
 })
 
+check('常驻规则（always: true）必须有 digest，长度 6–60 字，且与 description 不同', () => {
+  const always = entries.filter((e) => e.meta.always === 'true')
+  const bad = []
+  for (const e of always) {
+    const d = e.meta.digest || ''
+    if (!d) { bad.push(`${e.r}：标了 always 但没有 digest（注入区块里会整条消失）`); continue }
+    const n = [...d].length
+    if (n < 6 || n > 60) bad.push(`${e.r}：digest ${n} 字（要求 6–60）`)
+    if (d === e.meta.description) bad.push(`${e.r}：digest 与 description 完全相同（没有精简，白占字节）`)
+  }
+  if (bad.length) throw new Error(`常驻规则不合规：\n  ${bad.join('\n  ')}`)
+  process.stdout.write(`        （常驻规则 ${always.length} 条）\n`)
+})
 console.log(`\n${passed} 项通过，${failures.length} 项失败。\n`)
 if (failures.length) {
   for (const f of failures) console.log(`FAILED: ${f.label}\n${(f.err && f.err.stack) || ''}\n`)

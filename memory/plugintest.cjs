@@ -570,7 +570,7 @@ async function main() {
     assert.equal(r.json.target, 'ui/from-settings-page.md')
     assert.ok(fs.existsSync(path.join(home, 'ui', 'from-settings-page.md')))
     const agents = fs.readFileSync(agentsPath, 'utf8')
-    assert.match(agents, /设置页写入/, 'AGENTS.md 区块应同步')
+    assert.match(agents, /工具配置\*\*（\d+ 条）/, 'AGENTS.md 区块应同步（分组地图）')
     const list = await get('/memory-api/list', '/memory-api/list?scope=global')
     assert.ok(list.json.entries.some((e) => e.target === 'ui/from-settings-page.md'), '新条目应出现在索引里')
   })
