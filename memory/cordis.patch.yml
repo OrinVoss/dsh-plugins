@@ -12,6 +12,11 @@
       config:
         maxBlockBytes: 32768
         autoCommit: true
+        # 工作区记忆区块：写进会话工作区自己的指令文件（DSH 会读 AGENTS.md / AGENTS.local.md）。
+        # 默认 AGENTS.local.md —— 独立生效，且按惯例不进版本控制；想让它进仓库就改成 AGENTS.md。
+        injectProjectBlock: true
+        projectBlockFile: AGENTS.local.md
+        maxProjectBlockBytes: 8192
         autoAgentsSync: true
         settingsPage: true
         syncOnStartup: true
