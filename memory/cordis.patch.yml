@@ -12,8 +12,9 @@
       config:
         maxBlockBytes: 32768
         autoCommit: true
-        # 工作区记忆区块：写进会话工作区自己的指令文件（DSH 会读 AGENTS.md / AGENTS.local.md）。
-        # 默认 AGENTS.local.md —— 独立生效，且按惯例不进版本控制；想让它进仓库就改成 AGENTS.md。
+        # 文件区块通道（已退休）：2026-10-09 起记忆索引改走系统提示词段 / runtime context，
+        # 下面的开关**被忽略**（不再写 AGENTS.md / AGENTS.local.md，且历史遗留区块会被自动摘掉）。
+        # 回滚：把 promptInjection.enabled 设为 false 并重启 —— 文件通道恢复、区块重写。
         injectProjectBlock: true
         projectBlockFile: AGENTS.local.md
         maxProjectBlockBytes: 8192

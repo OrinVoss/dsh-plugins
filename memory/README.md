@@ -234,9 +234,9 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
 | `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
 | `autoCommit` | `true` | 落盘后把记忆库**本地提交**一次（`git add -A && git commit`，**从不 push**）。home 不是 git 仓库时静默跳过；任何 git 失败都吞掉、不影响记忆写入。stdio 用 `ignore`（沙箱下管道捕获子进程输出会 EPERM）。设 `false` 关掉 |
-| `injectProjectBlock` | `true` | 是否按工作区把**项目记忆索引**写进 `<cwd>/AGENTS.local.md` 的托管区块（见 §12.1） |
-| `projectBlockFile` | `AGENTS.local.md` | 工作区块写进哪个文件（与全局的 `agentsPath` 分开） |
-| `maxProjectBlockBytes` | `8192` | 工作区块的字节预算 |
+| `injectProjectBlock` | `true` | **文件通道（已退休，2026-10-09）**：是否把索引写进 `AGENTS.md`/`AGENTS.local.md` 的托管区块。**`promptInjection` 生效时这个开关被忽略**（不再写文件）；它只在 `promptInjection.enabled:false`（回滚到文件通道）时起作用 |
+| `projectBlockFile` | `AGENTS.local.md` | 工作区块写进哪个文件（仅文件通道用） |
+| `maxProjectBlockBytes` | `8192` | 工作区块的字节预算（仅文件通道用） |
 | `blockMode` | `layered` | `layered` = 分层区块（头部 + 触发规则 + 规则速查 + 专题地图，见 §12.1）；`full` = 旧行为（逐条索引全量）。**这是 L0 的一键回滚开关** |
 | `triggerLines` | 内置 5 条 | 「动手前先查记忆」那几条触发规则；给了就**整体覆盖**内置默认 |
 | `sectionHints` | 内置 5 组 | 专题地图每行后面的关键词提示（按分组名覆盖）。内置默认是刻意的——**本文件只在应用启动时读**，写在这里的新键要重启才生效，内置默认保证「改完代码即生效」 |
@@ -604,8 +604,18 @@ user's long-term memory store. … copy their entry lines (title, `name`, and su
    实测报 `invalidatePromptCache is not defined`（两个函数作用域不同）→ 现放模块级。
 3. **别往组装上下文对象上写标记**：它可能是冻结的，写入会抛错并被自己的 catch 吞掉，表现为"探针没触发"。
 
-**配置**：`promptInjection: {enabled, sectionOrder, contextOrder}`；`enabled: false` 只关这条通道
-（文件区块若还在则继续生效）。**下一步**：验证通过后停写文件区块，并一次性摘掉两个已存在的区块。
+**配置**：`promptInjection: {enabled, sectionOrder, contextOrder}`。
+
+**第二步（2026-10-09 当天完成）—— 文件通道已退休**：
+
+- `fileBlocksEnabled(ctx, cfg)` 决定文件通道是否生效：**能走系统提示词通道就不写文件**。
+  显式 `injectProjectBlock: false` 仍是关闭；`promptInjection.enabled: false` 是**回滚开关**
+  （恢复文件通道，下次启动重写区块）。
+- 走新通道时，启动的 `sync(null)` 与 L1 钩子首次拿到 cwd 时都会调 `store.stripFileBlocks()`：
+  摘掉历史遗留的托管区块，**全局文件若只剩我们写的那行标题就整个删掉**（否则官方加载器每轮还会
+  注入一条只有标题的空指令）。
+- 实测：`~/.dsh/AGENTS.md` 被删、session 里出现 "Instructions removed: ~/.dsh/AGENTS.md"；
+  `AGENTS.local.md` 在下次用户轮次由钩子摘掉。
 
 ## 13. 自动提交（`autoCommit`）
 

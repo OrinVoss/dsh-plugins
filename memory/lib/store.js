@@ -35,6 +35,9 @@ const os = require('node:os')
 
 const BLOCK_BEGIN = '<!-- dsh-memory:begin -->'
 const BLOCK_END = '<!-- dsh-memory:end -->'
+// 全局指令文件的标题：新建时写它；摘掉区块后若只剩这一行，说明文件没别的用途 → 连文件一起删
+// （否则官方加载器每轮还会注入一条只有标题的"空指令"）。
+const GLOBAL_HEADER = '# 全局指令（对每个工作区生效）'
 const INDEX_FILE = 'INDEX.md'
 const PROJECT_INDEX_FILE = 'MEMORY.md'
 const PROJECTS_DIR = 'projects'
@@ -1014,7 +1017,7 @@ function createStore(options) {
     const current = readText(agentsPath)
     let next
     if (current === null || current.trim() === '') {
-      next = `# 全局指令（对每个工作区生效）\n\n${block}\n`
+      next = `${GLOBAL_HEADER}\n\n${block}\n`
     } else {
       const begin = current.indexOf(BLOCK_BEGIN)
       const end = current.indexOf(BLOCK_END)
@@ -1067,6 +1070,47 @@ function createStore(options) {
     }
     lines.push(PROJECT_BLOCK_END)
     return lines.join('\n')
+  }
+
+  /**
+   * 摘掉托管区块（关闭文件通道时用；2026-10-09 起默认改走系统提示词通道）。
+   * 只动 begin/end 之间的内容；文件因此变空就删掉（AGENTS.local.md 是本插件创建的）。
+   * 幂等：没有区块时返回 changed:false。
+   * @param {string|null} cwd 会话工作区（null 只处理全局 AGENTS.md）
+   */
+  function stripFileBlocks(cwd) {
+    const removeFrom = (file, begin, end) => {
+      const cur = readText(file)
+      if (cur === null) return { path: file, changed: false }
+      const b = cur.indexOf(begin)
+      const e = cur.indexOf(end)
+      if (b === -1 || e === -1 || e < b) return { path: file, changed: false }
+      const next = `${cur.slice(0, b)}${cur.slice(e + end.length)}`.replace(/\n{3,}/g, '\n\n').trim()
+      if (!next) {
+        try { fs.unlinkSync(file) } catch (_) { /* 删不掉就算了 */ }
+        return { path: file, changed: true, deleted: true }
+      }
+      writeTextAtomic(file, `${next}\n`)
+      return { path: file, changed: true, deleted: false, bytes: Buffer.byteLength(next, 'utf8') }
+    }
+    const g = removeFrom(agentsPath, BLOCK_BEGIN, BLOCK_END)
+    // 全局文件若只剩我们自己写的那行标题（区块已摘、用户没写别的），把文件也删掉 ——
+    // 否则官方加载器每轮还会注入一条只有标题的空指令。
+    if (g && !g.deleted) {
+      try {
+        const rest = (readText(agentsPath) || '').trim()
+        if (rest === GLOBAL_HEADER) { fs.unlinkSync(agentsPath); g.deleted = true }
+      } catch (_) { /* 删不掉就算了 */ }
+    }
+    let proj = null
+    const raw = cwd === null || cwd === undefined ? '' : String(cwd).trim()
+    if (raw && path.isAbsolute(raw)) {
+      const dir = path.resolve(raw)
+      if (dir !== home && !dir.startsWith(home + path.sep)) {
+        proj = removeFrom(path.join(dir, projectBlockFile), PROJECT_BLOCK_BEGIN, PROJECT_BLOCK_END)
+      }
+    }
+    return { global: g, project: proj }
   }
 
   /**
@@ -1131,6 +1175,7 @@ function createStore(options) {
     alwaysRules,
     sectionMap,
     buildProjectBlock,
+  stripFileBlocks,
     syncAgents,
     syncWorkspaceAgents,
     commitLibrary,

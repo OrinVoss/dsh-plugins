@@ -124,6 +124,20 @@ function attempt(toolName, fn) {
 }
 
 /**
+ * 文件区块通道（AGENTS.md / AGENTS.local.md）是否生效。
+ *
+ * 新规则（2026-10-09）：能用系统提示词通道时**不再写文件** —— 文件是"插件关掉后仍留着、
+ * 仍被官方加载器注入"的东西（内容里的 memory_search/memory_read 那时已不存在），
+ * 而系统提示词段 / runtime context 都是作用域 effect，随插件销毁，内容与事实始终一致。
+ *   · 显式 injectProjectBlock:false 关闭（老语义保留）
+ *   · promptInjection.enabled:false 是回滚开关：恢复文件通道并在下次启动重写区块
+ */
+function fileBlocksEnabled(ctx, cfg) {
+  const promptOn = !(cfg && cfg.promptInjection && cfg.promptInjection.enabled === false) && !!(ctx && ctx.systemPrompt)
+  return (cfg ? cfg.injectProjectBlock !== false : true) && !promptOn
+}
+
+/**
  * 清掉 require 缓存后再加载插件自己的 lib 模块。
  * 为什么必须这样：DSH 的 HMR 只重挂载入口（host.js），**Node 的 require 缓存不会失效**，
  * 于是 applyInner 里 require('./lib/x') 一直拿到首次加载的旧版本 —— 实测表现为
@@ -156,16 +170,24 @@ function applyInner(ctx, config) {
     triggerLines: cfg.triggerLines
   })
   const autoSync = cfg.autoAgentsSync !== false
+  const fileBlocks = fileBlocksEnabled(ctx, cfg)
 
   const sync = (cwd) => {
     if (!autoSync) return
     try {
-      store.syncAgents(cwd)
-      // 有 cwd 时顺带把「工作区记忆」区块写进工作区自己的指令文件（默认 AGENTS.local.md）。
-      // 全局区块进 ~/.dsh/AGENTS.md，两者互不影响；没有项目条目时这个调用是空操作。
-      if (cwd) {
-        const ws = store.syncWorkspaceAgents(cwd)
-        if (ws && ws.changed) ctx.logger.info('dsh-memory: 已同步工作区记忆区块 → %s', ws.path)
+      if (fileBlocks) {
+        store.syncAgents(cwd)
+        // 有 cwd 时顺带把「工作区记忆」区块写进工作区自己的指令文件（默认 AGENTS.local.md）。
+        // 全局区块进 ~/.dsh/AGENTS.md，两者互不影响；没有项目条目时这个调用是空操作。
+        if (cwd) {
+          const ws = store.syncWorkspaceAgents(cwd)
+          if (ws && ws.changed) ctx.logger.info('dsh-memory: 已同步工作区记忆区块 → %s', ws.path)
+        }
+      } else {
+        // 文件通道已退休（记忆索引改走系统提示词段 / runtime context）：顺手摘掉历史遗留的托管区块。
+        const r = store.stripFileBlocks(cwd)
+        if (r.global && r.global.changed) ctx.logger.info('dsh-memory: 已摘掉 AGENTS.md 托管区块（改走系统提示词通道）→ %s', r.global.path)
+        if (r.project && r.project.changed) ctx.logger.info('dsh-memory: 已摘掉工作区记忆区块 → %s', r.project.path)
       }
       invalidatePromptCache()
     } catch (err) {
@@ -453,6 +475,8 @@ function readJsonBody(req) {
  * 的作用域错位（实测报 invalidatePromptCache is not defined）。
  */
 function applyInjection(ctx, store, cfg) {
+  const fileBlocks = fileBlocksEnabled(ctx, cfg)
+  const strippedWorkspaces = new Set()   // 已摘过遗留文件区块的工作区（幂等，只做一次）
   // ---- L1：按当前用户消息检索记忆，只注入命中的几条（2026-10-09）
   // 依据：10 天实测 456 个被注入会话里 86.2% 从未用过记忆工具；48 条从未被读的条目里 41 条主题
   // 在会话里出现过（投递失败）。所以把"模型自己想起来搜"换成"相关记忆自动出现"。
@@ -520,6 +544,16 @@ function applyInjection(ctx, store, cfg) {
           const header = (payload.agent && payload.agent.session && payload.agent.session.header) || {}
           const sessionId = header.id || 'default'
           const cwd = header.cwd || null
+          // 文件通道已退休：本会话第一次拿到 cwd 时，摘掉该工作区历史遗留的托管区块（幂等，每 cwd 一次）
+          if (!fileBlocks && cwd && !strippedWorkspaces.has(cwd)) {
+            strippedWorkspaces.add(cwd)
+            try {
+              const r = store.stripFileBlocks(cwd)
+              if (r.project && r.project.changed) {
+                logInject({ ev: 'stripped-workspace-block', path: r.project.path, deleted: !!r.project.deleted })
+              }
+            } catch (_) { /* 摘不掉不影响注入 */ }
+          }
           const stepNo = Number.isFinite(payload.step) ? payload.step : 0
           const injectedMap = injectedBySession.get(sessionId) || new Map()
           // 去重：主触发器是压缩（见下面的 session/event 监听，压缩会清空记账）；
@@ -916,3 +950,4 @@ module.exports = {
 // remount #30 (injection extracted)
 // remount #31 (cwd probe)
 // remount #32 (throttled cwd probe)
+// remount #33 (file channel retired)
