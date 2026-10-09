@@ -225,8 +225,8 @@ check('参数里所有 enum 值都合法', () => {
   assert.ok(tool('memory_write').parameters.properties.type.enum.includes('reference'))
 })
 
-check('inject 声明了 tools/agents/sessions/sessionProjections（事件与 agent 服务）', () => {
-  assert.deepEqual(host.inject, ['tools', 'agents', 'sessions', 'sessionProjections'])
+check('inject 声明齐了所需服务（tools/agents/sessions/sessionProjections/systemPrompt）', () => {
+  assert.deepEqual(host.inject, ['tools', 'agents', 'sessions', 'sessionProjections', 'systemPrompt'])
   assert.equal(host.name, 'dsh-memory')
 })
 

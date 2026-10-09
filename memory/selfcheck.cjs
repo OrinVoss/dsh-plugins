@@ -954,6 +954,19 @@ check('README 记录的注入消息形状与代码一致（防形状漂移）', 
   assert.ok(readme.includes('source'), 'README §12.2 应说明注入消息必须带 source')
 })
 
+check('压缩保护段：含记忆标记与 Critical Context、确定性、够短', () => {
+  const g = require('./lib/compaction-guard')
+  assert.ok(g.VERSION >= 1)
+  assert.match(g.TEXT, /（dsh-memory 自动检索：/, '要能认住 L1 注入的那条消息的开头')
+  assert.match(g.TEXT, /Critical Context/, '要指名写进哪一节')
+  assert.match(g.TEXT, /verbatim/, '要要求原样保留')
+  assert.equal(g.TEXT, require('./lib/compaction-guard').TEXT, '同一模块两次取值必须一致（前缀缓存友好）')
+  assert.ok(g.DEFAULT_ORDER > 10200, '段顺序要排在第一方内容之后')
+  assert.match(g.SECTION_NAME, /^dsh-memory:/)
+  assert.ok(Buffer.byteLength(g.TEXT, 'utf8') < 800, '段文本每次请求都会重复，必须短')
+  assert.equal(g.TEXT.includes('{{'), false, '段内不要出现会被插值的 {{ }}')
+})
+
 // ---------------------------------------------------------------- 结果
 
 fs.rmSync(root, { recursive: true, force: true })

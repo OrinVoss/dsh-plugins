@@ -687,9 +687,7 @@ function applyHttp(ctx, store, cfg) {
           const lines = picked.picked.map((p) => retrieve.line(p))
           // 消息形状：**必须带 source**。只给 {content:[...]} 会让框架在 message.source.kind 上
           // 抛 "Cannot read properties of undefined (reading 'kind')"，整轮崩掉（2026-10-09 实测，
-          // 用户的提问因此没被收到）。这里按官方指令加载器的形状构造，并优先用**真实用户消息的
-          // source 做模板**（它一定是框架认得的形状），失败才退回固定形状。
-          // 形状依据：官方指令加载器构造的是 {content, source:{kind, form, changes}}；
+          // 用户的提问因此没被收到）。形状依据：官方指令加载器构造的是 {content, source:{kind, form, changes}}；
           // 自定义 kind 在生产里可行（agent-team-plus 用 kind:"team-message"）。
           const source = { kind: 'dsh-memory-retrieval', form: 'retrieval', changes: [] }
           const injected = { content: [{ type: 'text', text }], source }
@@ -754,12 +752,29 @@ function applyHttp(ctx, store, cfg) {
     }
   }
 
+  // 把"压缩时必须保留 dsh-memory 检索条目"注册进**系统提示词**。
+  // 原理与依据见 lib/compaction-guard.js 顶部注释（摘要模型会逐字回放系统提示词，且它永不被遮蔽）。
+  // 这是**软保证**（靠摘要模型照做）；硬保证是上面那套"压缩后比对 shadowedSeqs 再补送"。
+  const guardCfg = (cfg.compactionGuard && typeof cfg.compactionGuard === 'object') ? cfg.compactionGuard : {}
+  if (guardCfg.enabled !== false) {
+    try {
+      const guard = freshRequire('./lib/compaction-guard')
+      const secText = (typeof guardCfg.text === 'string' && guardCfg.text.trim()) ? guardCfg.text : guard.TEXT
+      const order = Number.isFinite(guardCfg.order) ? guardCfg.order : guard.DEFAULT_ORDER
+      ctx.systemPrompt.section({ name: guard.SECTION_NAME, order, text: secText, interpolate: false })
+      logInject({ ev: 'compaction-guard-registered', guardV: guard.VERSION, order, bytes: Buffer.byteLength(secText, 'utf8') })
+    } catch (err) {
+      logInject({ ev: 'compaction-guard-failed', err: String((err && err.message) || err) })
+      try { ctx.logger.warn('dsh-memory: 注册压缩保护段失败: %o', err) } catch (_) { /* 降级 */ }
+    }
+  }
+
   ctx.logger.info('dsh-memory: 设置页接口已注册（/memory-api/*）')
 }
 
 module.exports = {
   name: 'dsh-memory',
-  inject: ['tools', 'agents', 'sessions', 'sessionProjections'],
+  inject: ['tools', 'agents', 'sessions', 'sessionProjections', 'systemPrompt'],
   apply(ctx, config) {
     globalThis.__dshMemoryConfig = config
     try {
@@ -788,3 +803,4 @@ module.exports = {
 // remount #22 (all lib via freshRequire)
 // remount #23 (shadow reinject)
 // remount #24 (short query guard)
+// remount #25 (compaction guard)

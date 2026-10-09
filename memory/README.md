@@ -241,6 +241,7 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `triggerLines` | 内置 5 条 | 「动手前先查记忆」那几条触发规则；给了就**整体覆盖**内置默认 |
 | `sectionHints` | 内置 5 组 | 专题地图每行后面的关键词提示（按分组名覆盖）。内置默认是刻意的——**本文件只在应用启动时读**，写在这里的新键要重启才生效，内置默认保证「改完代码即生效」 |
 | `retrieve` | 见下 | L1 检索注入（见 §12.2）。子字段：`enabled`(`true`)、`k`(`3`)、`minScore`(`8`)、`maxBytes`(`2000`)、`minQueryChars`(`4`，查询有效长度不足就不注入)、`repeatAfterSteps`(`60`，兜底去重窗口)、`clearOnCompaction`(`true`)、`log`(`true`)。`enabled: false` 是 L1 的一键回滚开关 |
+| `compactionGuard` | 见下 | 把「压缩时必须保留 dsh-memory 检索条目」注册进**系统提示词**（见 §12.3）。子字段：`enabled`(`true`)、`order`(`10300`)、`text`(可整体覆盖段文本)。`enabled: false` 关掉 |
 
 ## 6. 从 Z code 导入已有记忆
 
@@ -545,6 +546,36 @@ L0 把逐条索引换成了规则 + 地图，代价是"细节要靠模型自己�
 - **降级**：钩子注册失败或本轮异常 → 记 warn 并原样返回，L0 照常工作。
 - **注入日志**：`%LOCALAPPDATA%\Temp\dsh-memory-l1.log`（每次用户轮记 `no-hit` 或 `inject`+targets），
   是 A/B 验证"搜索率/命中率有没有改善"的数据源。
+
+### 12.3 压缩保护段（`compactionGuard`，2026-10-09 新增）
+
+**要解决的问题**：DSH 压缩长会话时会把旧消息 **shadow** 掉（`compaction/prune` 的 `shadowedSeqs`），
+而 L1 的注入**只在用户轮次发生一次**（为了前缀缓存），所以它可能被压缩吃掉。§12.2 那套"比对
+`shadowedSeqs` 再补送"是**硬保证**，本节是降低丢失概率的**软保证**。
+
+**做法**：不直接改压缩提示词——`dsh-compaction-basic` 的 `COMPACTION_INSTRUCTION` 是**模块私有常量**，
+config schema 里没有提示词字段，想改只能 patch asar（应用一更新就没了）。改为用官方扩展点
+`ctx.systemPrompt.section({name, order, text})`（`dsh-system-prompt`）注册一段**系统提示词**：
+
+```
+Note for context compaction only: when this conversation is condensed into a `<compacted-summary>`
+checkpoint, messages that begin with "（dsh-memory 自动检索：" carry entries retrieved from the
+user's long-term memory store. … copy their entry lines (title, `name`, and summary) verbatim into
+"## Critical Context" — do not paraphrase, merge, shorten or drop them. …
+```
+
+**为什么放系统提示词**（两条都来自 `dsh-compaction-basic` 的 README，实测核对过）：
+
+1. **摘要模型会逐字回放系统提示词**（surface 节点 0 作为 `messages` 首项）→ 要求必然送到它眼前；
+2. **系统提示词永不被遮蔽**（压缩范围一律从第一个非 `system/message` 节点开始）→ 指令自己不会被压缩掉。
+
+**代价与性质**：段文本约 595 B，每次请求都重复（见 `dsh-system-prompt` 的 Token 影响），但内容静态、
+前缀稳定（KV cache 友好）。**它是软保证**（靠摘要模型照做），所以与 §12.2 的硬保证叠加使用。
+配置：`compactionGuard: {enabled, order, text}`；段名 `dsh-memory:compaction-guard`，默认 order `10300`
+（排在第一方内容 10000/10100/10200 之后）。
+
+**验证方式**：会话日志里的 `system/message` 事件应包含段文本（实测 seq 4384、整段 9304 字符里带着它）；
+插件日志有 `compaction-guard-registered` / `compaction-guard-failed`。
 
 ## 13. 自动提交（`autoCommit`）
 
