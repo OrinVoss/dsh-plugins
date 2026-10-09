@@ -12,51 +12,6 @@
       config:
         maxBlockBytes: 32768
         autoCommit: true
-        # 文件区块通道（已退休）：2026-10-09 起记忆索引改走系统提示词段 / runtime context，
-        # 下面的开关**被忽略**（不再写 AGENTS.md / AGENTS.local.md，且历史遗留区块会被自动摘掉）。
-        # 回滚：把 promptInjection.enabled 设为 false 并重启 —— 文件通道恢复、区块重写。
-        injectProjectBlock: true
-        projectBlockFile: AGENTS.local.md
-        maxProjectBlockBytes: 8192
-        # L0 注入形态：layered = 规则速查 + 专题地图（默认，2026-10-09 起）；
-        # full = 逐条摘要（旧行为，改这一行即可一键回滚）。
-        blockMode: layered
-        # 记忆注入走插件自己的扩展点（不再靠 AGENTS.md 托管区块）：全局 L0 进系统提示词段，
-        # 工作区索引进 runtime context。两者都是作用域 effect ⇒ 随插件销毁；
-        # sectionOrder 落在一方内容（10200）与压缩保护段（10300）之间；contextOrder 排在 110/115/120 之后。
-        promptInjection:
-          enabled: true
-          sectionOrder: 10250
-          contextOrder: 200
-        # 压缩保护：把「压缩时必须保留 dsh-memory 检索条目」注册进系统提示词。
-        # 为什么放系统提示词：压缩时摘要模型会**逐字回放**系统提示词（surface 节点 0），
-        # 而系统提示词**永不被遮蔽** —— 指令必然送到摘要模型眼前，且自己不会被压缩掉。
-        # 这是软保证；硬保证是 L1 里"压缩后比对 shadowedSeqs 再补送"那套。enabled:false 可关。
-        compactionGuard:
-          enabled: true
-          order: 10300
-        # L1 检索注入：每次用户轮次按消息内容检索记忆，只注入命中的几条（默认开）。
-        # enabled:false 可单独关掉；k/minScore/maxBytes 调松紧；log:false 关掉注入日志。
-        # 注意：本文件只在应用启动时读；这里的值只是"文档 + 覆盖"，默认值在代码里（改完即生效）。
-        retrieve:
-          enabled: true
-          k: 3
-          minScore: 8
-          maxBytes: 2000
-          # 查询有效长度（去标点空白）低于此值不注入：「继续」「ok」这类短消息检索必出噪声
-          minQueryChars: 4
-          # 去重：主触发器是「压缩事件」（压缩会把旧消息 shadow 掉，那时必须允许重送）。
-          # clearOnCompaction=false 可关掉；repeatAfterSteps 只是兜底窗口（默认 60）。
-          clearOnCompaction: true
-          repeatAfterSteps: 60
-        # 专题地图里每个分组的关键词提示（让模型知道该搜什么）
-        sectionHints:
-          本机与网络: 代理 10808 / 外网可达性 / 蓝屏 TDR / 内存显存预算 / 麦克风
-          脚本与开发环境: PowerShell/GBK 编码 / VS 构建工具 / 安卓 / 端口排查 / C++ 控制台中文
-          本机 AI 栈（llama.cpp / sd.cpp）: llama.cpp 调参 / CUDA / sd-server / Qwen 出图 / 模型基准与耗时
-          交付物制作技巧: PPT / 网页与单文件 HTML / SVG / 绘本 / 出片与混音 / Blender / 图表 / 验收截图 / 推理题与跑批
-          工具配置: DSH 插件与预设 / kimi-webbridge / kimi-cu / opencode / 沙箱边界 / 会话日志 / 自研仓库
         autoAgentsSync: true
         settingsPage: true
         syncOnStartup: true
-# probe reload trigger

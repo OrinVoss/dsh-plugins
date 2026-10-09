@@ -29,15 +29,7 @@ DSH 原本没有记忆功能：会话日志只是历史记录，`AGENTS.md` 只�
     └── <条目>.md
 ```
 
-工作区键 = `<目录名 slug>-<规范化 cwd 的 sha1 前 16 位>`。
-
-规则细节（与 Z code 的 `projects/<slug>-<hash>` **同一套规则**，但哈希随路径而变，不是同一个值）：
-`path.resolve(cwd)` → 反斜杠转 `/` → 去掉尾部 `/` → **转小写** → sha1 → 取前 16 位十六进制；
-slug 由目录名小写、非 `[a-z0-9\u4e00-\u9fa5._-]` 的字符一律换成 `-` 得到。
-
-本机实例：本工作区 `D:\桌面\编程作品\马具对比\DeepSeek Harness` → `deepseek-harness-e9b7a1e936a10df7`
-（`~/.dsh/memory/projects/` 下另有两个：`测试-aed73870c10edae0`、`ai教学-36df60ec49a8de76`）。
-想知道某个目录的键，直接调 `store.projectKey(cwd)`，别手算。
+工作区键 = `<目录名 slug>-<规范化 cwd 的 sha1 前 16 位>`，例如 `deepseek-harness-71e9342bec5e8de1`——和 Z code 的 `projects/paper-71e9342bec5e8de1` 同一套规则。
 
 条目文件格式（与 Z code 相同，可双向互认）：
 
@@ -234,15 +226,6 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
 | `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
 | `autoCommit` | `true` | 落盘后把记忆库**本地提交**一次（`git add -A && git commit`，**从不 push**）。home 不是 git 仓库时静默跳过；任何 git 失败都吞掉、不影响记忆写入。stdio 用 `ignore`（沙箱下管道捕获子进程输出会 EPERM）。设 `false` 关掉 |
-| `injectProjectBlock` | `true` | **文件通道（已退休，2026-10-09）**：是否把索引写进 `AGENTS.md`/`AGENTS.local.md` 的托管区块。**`promptInjection` 生效时这个开关被忽略**（不再写文件）；它只在 `promptInjection.enabled:false`（回滚到文件通道）时起作用 |
-| `projectBlockFile` | `AGENTS.local.md` | 工作区块写进哪个文件（仅文件通道用） |
-| `maxProjectBlockBytes` | `8192` | 工作区块的字节预算（仅文件通道用） |
-| `blockMode` | `layered` | `layered` = 分层区块（头部 + 触发规则 + 规则速查 + 专题地图，见 §12.1）；`full` = 旧行为（逐条索引全量）。**这是 L0 的一键回滚开关** |
-| `triggerLines` | 内置 5 条 | 「动手前先查记忆」那几条触发规则；给了就**整体覆盖**内置默认 |
-| `sectionHints` | 内置 5 组 | 专题地图每行后面的关键词提示（按分组名覆盖）。内置默认是刻意的——**本文件只在应用启动时读**，写在这里的新键要重启才生效，内置默认保证「改完代码即生效」 |
-| `retrieve` | 见下 | L1 检索注入（见 §12.2）。子字段：`enabled`(`true`)、`k`(`3`)、`minScore`(`8`)、`maxBytes`(`2000`)、`minQueryChars`(`4`，查询有效长度不足就不注入)、`repeatAfterSteps`(`60`，兜底去重窗口)、`clearOnCompaction`(`true`)、`log`(`true`)。`enabled: false` 是 L1 的一键回滚开关 |
-| `compactionGuard` | 见下 | 把「压缩时必须保留 dsh-memory 检索条目」注册进**系统提示词**（见 §12.3）。子字段：`enabled`(`true`)、`order`(`10300`)、`text`(可整体覆盖段文本)。`enabled: false` 关掉 |
-| `promptInjection` | 见下 | 记忆索引改走插件自己的扩展点（见 §12.4）。子字段：`enabled`(`true`)、`sectionOrder`(`10250`)、`contextOrder`(`200`)。与 `settingsPage`/`webServer` **无关** |
 
 ## 6. 从 Z code 导入已有记忆
 
@@ -496,137 +479,6 @@ This file changed after it was loaded. Use the following content instead of the 
 | `autoAgentsSync: false` | 写记忆不再改 AGENTS.md，改为手动同步——一个会话最多 1 次重注入 | 索引会滞后；但 `memory_search` 永远读磁盘，不受影响 |
 | `maxBlockBytes: 8192` | 每次重注入的份量变小 | 索引不全，需检索补足 |
 | 把写记忆集中在会话开头 | 天然只有 1–2 次重注入 | 靠习惯 |
-
-### 12.1 工作区记忆区块（2026-10-09 新增）
-
-全局 `~/.dsh/AGENTS.md` 是所有工作区**共用**的，塞不进 per-workspace 内容；而 DSH 的
-`dsh-agent-instructions` 会按 `projectRoot→cwd` 逐级读工作区自己的 `AGENTS.md` / `AGENTS.local.md`
-（`.local` 变体是**独立候选**，不需要 base 文件存在）。所以项目索引写进**工作区自己的**指令文件：
-
-- **渲染**：`buildProjectBlock(cwd)` —— 与全局区块同构，标记是 `<!-- dsh-memory-project:begin/end -->`，
-  预算独立（`maxProjectBlockBytes`，默认 8192）。
-- **落盘**：`syncWorkspaceAgents(cwd)`，由 `host.js` 的 `sync(cwd)` 在 `memory_write` / `memory_forget`
-  之后调用（**只有拿到会话 cwd 时才写**；设置页那条路径只有 key、没有 cwd，故不动工作区文件）。
-- **默认文件 `AGENTS.local.md`**：独立生效，且按惯例不进版本控制，避免把生成物塞进用户的仓库；
-  想让它进仓库就把 `projectBlockFile` 改成 `AGENTS.md`。
-- **三条安全约定**：①只动托管区块，区块外一个字不改；②本工作区没有项目条目**且**文件里没有托管区块时
-  **什么都不做**（不在用户仓库里凭空建文件）；③条目删空后摘掉区块，文件因此变空则删掉文件。
-- **关掉**：`injectProjectBlock: false`。
-- **测试注意**：假 session 的 cwd 必须是临时目录——用真实工作区路径会把测试夹具写进开发者的仓库
-  （2026-10-09 真漏过一次，`plugintest.cjs` / `selfcheck.cjs` 已改用 `mkdtemp`）。
-
-### 12.2 L1 检索注入（2026-10-09 新增）
-
-L0 把逐条索引换成了规则 + 地图，代价是"细节要靠模型自己搜"。实测 456 个被注入会话里
-**86.2% 一次都没搜过**；48 条从未被读的条目里 **41 条主题在会话里出现过**（投递失败）。
-所以 L1 把"模型想起来搜"换成"相关记忆自动出现"：
-
-- **钩子**：`ctx.on("agent/pre-step", async (payload, next) => …)`。**必须在 `inject` 里声明 `agents`**，
-  否则钩子注册成功但永远不触发（原来只声明 `tools`，实测踩到）。
-- **时机**：只在**用户轮次**注入（`payload.messages` 里出现新的 user 消息）；工具续跑步骤直接返回，
-  既省 token 也让前缀保持稳定。
-- **流程**：取本轮用户消息（剥掉 `<system-reminder>` 与指令块）→ `search(project)` + `search(global)`
-  → `lib/retrieve.js` 的 `pickHits` 按 `k/minScore/maxBytes/seen` 挑 → `renderInjection` 渲染 →
-  以 `{content:[{type:"text",text}], source:{kind:"dsh-memory-retrieval", form:"retrieval", changes:[]}}`
-  追加到本轮消息。**`source` 不能省**：只给 `{content:[...]}` 会让框架去读 `message.source.kind`，
-  抛 `Cannot read properties of undefined (reading 'kind')`、**整轮直接崩掉**（2026-10-09 实测踩到，
-  那条提问因此没被收到）。自定义 `kind` 是可行的——官方团队插件用 `kind:"team-message"`。
-- **三条硬约束**（都是为了不破坏前缀缓存，实测缓存命中率 96.9%、前缀可达 20 万 token）：
-  ①只追加，绝不改写/删除已注入消息；②内容确定性；③同一条目不反复注入。
-- **去重的主触发器是「压缩」而不是步数**：DSH 会压缩长会话，`compaction/prune` 会把消息 **shadow** 掉
-  （实测某会话 15 个压缩事件、prune 落在 seq 23/29/36/48），那条「我送过了」的内容可能已不在上下文里。
-  所以 `host.js` 监听 `session/event`：收到 `compaction/end` / `compaction/prune` 就**清空该会话的注入记账**，
-  下一次用户轮次重新可注入。`repeatAfterSteps`（默认 60）只是兜底窗口，防止「没压缩但会话极长」时反复注入。
-  `clearOnCompaction: false` 可关掉压缩触发。
-- **精确补送**：注入消息在会话日志里是 `user/message` 事件、带自己的 `seq` 与上面的 `source.kind`，
-  所以能靠 `source.kind` 认出来；`compaction/prune` 又带 `shadowedSeqs`（被遮掉的消息 seq）→
-  两者比对，**只把确实被遮掉的那几条原文重送**（原文复用＝确定性，不必再读库）。
-  日志里对应 `injection-seq-recorded` / `injection-shadowed` / `restore-after-compaction`。
-- **配置**：`retrieve: {enabled, k, minScore, maxBytes, minQueryChars, repeatAfterSteps, clearOnCompaction, log}`。
-  `enabled: false` 只关 L1；`blockMode: full` 只关 L0——两级都能单独回滚。
-- **降级**：钩子注册失败或本轮异常 → 记 warn 并原样返回，L0 照常工作。
-- **注入日志**：`%LOCALAPPDATA%\Temp\dsh-memory-l1.log`（每次用户轮记 `no-hit` 或 `inject`+targets），
-  是 A/B 验证"搜索率/命中率有没有改善"的数据源。
-
-### 12.3 压缩保护段（`compactionGuard`，2026-10-09 新增）
-
-**要解决的问题**：DSH 压缩长会话时会把旧消息 **shadow** 掉（`compaction/prune` 的 `shadowedSeqs`），
-而 L1 的注入**只在用户轮次发生一次**（为了前缀缓存），所以它可能被压缩吃掉。§12.2 那套"比对
-`shadowedSeqs` 再补送"是**硬保证**，本节是降低丢失概率的**软保证**。
-
-**做法**：不直接改压缩提示词——`dsh-compaction-basic` 的 `COMPACTION_INSTRUCTION` 是**模块私有常量**，
-config schema 里没有提示词字段，想改只能 patch asar（应用一更新就没了）。改为用官方扩展点
-`ctx.systemPrompt.section({name, order, text})`（`dsh-system-prompt`）注册一段**系统提示词**：
-
-```
-Note for context compaction only: when this conversation is condensed into a `<compacted-summary>`
-checkpoint, messages that begin with "（dsh-memory 自动检索：" carry entries retrieved from the
-user's long-term memory store. … copy their entry lines (title, `name`, and summary) verbatim into
-"## Critical Context" — do not paraphrase, merge, shorten or drop them. …
-```
-
-**为什么放系统提示词**（两条都来自 `dsh-compaction-basic` 的 README，实测核对过）：
-
-1. **摘要模型会逐字回放系统提示词**（surface 节点 0 作为 `messages` 首项）→ 要求必然送到它眼前；
-2. **系统提示词永不被遮蔽**（压缩范围一律从第一个非 `system/message` 节点开始）→ 指令自己不会被压缩掉。
-
-**代价与性质**：段文本约 595 B，每次请求都重复（见 `dsh-system-prompt` 的 Token 影响），但内容静态、
-前缀稳定（KV cache 友好）。**它是软保证**（靠摘要模型照做），所以与 §12.2 的硬保证叠加使用。
-配置：`compactionGuard: {enabled, order, text}`；段名 `dsh-memory:compaction-guard`，默认 order `10300`
-（排在第一方内容 10000/10100/10200 之后）。
-
-**验证方式**：会话日志里的 `system/message` 事件应包含段文本（实测 seq 4384、整段 9304 字符里带着它）；
-插件日志有 `compaction-guard-registered` / `compaction-guard-failed`。
-
-### 12.4 记忆索引改走插件扩展点（`promptInjection`，2026-10-09 第二步）
-
-**要解决的问题**：AGENTS.md / AGENTS.local.md 是**文件写入** —— 插件关掉后区块仍留在文件里、仍被官方
-加载器注入，而区块里写的 `memory_search`/`memory_read` 那时已经不存在了（**指令与事实不一致**）。
-`ctx.on` 与 `ctx.systemPrompt.section()` 这类注册都绑在插件作用域上、随插件销毁，**写进文件的东西不会**。
-
-**做法**：把记忆索引从文件搬到两个同样"随插件销毁"的扩展点：
-
-| 层 | 通道 | 说明 |
-|---|---|---|
-| 全局 L0（规则速查 + 专题地图） | `ctx.systemPrompt.section({name:'dsh-memory:index', order:10250})` | 进**系统提示词**；顺带**永不被压缩遮蔽** |
-| 工作区项目索引 | `ctx.systemPrompt.context({name:'dsh-memory:project', order:200})` | 进 **runtime context**（与 `time-context` 同一通道，仍是每轮 user 消息） |
-
-两者的 `text` 都传**函数**（`text(context)` 每次组装求值）——工作区那条据此按 `agent.session.header.cwd`
-现算。段文本带 5 秒 TTL 缓存（`alwaysRules()` 要扫全部条目文件，不能每次组装都扫），写库后立即失效。
-
-**三个必须记住的实现事实**（都是实测踩出来的）：
-
-1. **注册必须挂在主 ctx 上**。三条注入通道原本被我追加在 `applyHttp`（设置页接口）函数末尾，而
-   `applyHttp` 只在 `settingsPage !== false` **且**存在 `webServer` 时才被调用 ⇒
-   `settingsPage: false` 会误关这三样、没有 webServer 的 profile 里则永不注册。
-   现已抽成 `applyInjection(ctx, store, cfg)`，由 `applyInner` 直接调用。
-2. **别把声明和赋值放在两个函数里**。`invalidatePromptCache` 曾在 `applyInner` 声明、在 `applyHttp` 赋值，
-   实测报 `invalidatePromptCache is not defined`（两个函数作用域不同）→ 现放模块级。
-3. **别往组装上下文对象上写标记**：它可能是冻结的，写入会抛错并被自己的 catch 吞掉，表现为"探针没触发"。
-
-**配置**：`promptInjection: {enabled, sectionOrder, contextOrder}`。
-
-**第二步（2026-10-09 当天完成并验证）—— 文件通道已退休**：
-
-- `fileBlocksEnabled(ctx, cfg)` 决定文件通道是否生效：**能走系统提示词通道就不写文件**。
-  显式 `injectProjectBlock: false` 仍是关闭；`promptInjection.enabled: false` 是**回滚开关**
-  （恢复文件通道，下次启动重写区块 —— 该配置只在应用启动时读）。
-- 走新通道时，启动的 `sync(null)` 与 L1 钩子首次拿到 cwd 时都会调 `store.stripFileBlocks()`：
-  摘掉历史遗留的托管区块，**全局文件若只剩我们写的那行标题就整个删掉**（否则官方加载器每轮还会
-  注入一条只有标题的空指令）。
-- **摘工作区文件有前置条件**：只有 `renderProject()` **真的产出过非空文本**（`contextChannelProven`）
-  才允许摘 —— 防"文件摘了、context 又渲染成空"导致工作区索引彻底看不见。
-- **实测（2026-10-09）**：`~/.dsh/AGENTS.md` 删除 → session 报 "Instructions removed"；
-  `AGENTS.local.md` 在下一个用户轮次被钩子删除并记 `stripped-workspace-block{deleted:true}`，
-  同时该工作区索引以 runtime context 形式出现在会话里 ✓。
-
-**排障用的两条探针**（各只记一次，留在代码里，日志在 `%LOCALAPPDATA%\Temp\dsh-memory-l1.log`）：
-
-- `section-text-called`：证明段/context 的 `text` 函数被调用（组装确实发生）；
-- `assembly-context-probe`：把组装上下文的键、`agent` 的键、每条 cwd 候选值都记下来 ——
-  实测组装上下文是 `{agent, scope, signal}`，**本身没有 cwd**，要从 `agent.session.header.cwd` 取；
-  而 cordis 按 inject 门控属性访问，**每条候选必须各自 try**，否则一条抛错就整段返回 null
-  （表现成"渠道静默渲染为空"，极难查）。
 
 ## 13. 自动提交（`autoCommit`）
 

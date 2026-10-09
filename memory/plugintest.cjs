@@ -15,10 +15,7 @@ const storeLib = require('./lib/store')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-plugin-'))
 const home = path.join(root, 'memory')
 const agentsPath = path.join(root, 'AGENTS.md')
-// 假 session 的 cwd 必须是**临时目录**：注入工作区记忆区块的代码会写 <cwd>/AGENTS.local.md，
-// 用真实工作区路径会把测试夹具泄漏到开发者自己的仓库里（2026-10-09 真漏过一次）。
-const cwd = path.join(root, 'workspace')
-fs.mkdirSync(cwd, { recursive: true })
+const cwd = 'D:\\桌面\\编程作品\\马具对比\\DeepSeek Harness'
 const projectKeyOfCwd = storeLib.projectKey(cwd)
 
 const registered = []
@@ -225,8 +222,8 @@ check('参数里所有 enum 值都合法', () => {
   assert.ok(tool('memory_write').parameters.properties.type.enum.includes('reference'))
 })
 
-check('inject 声明齐了所需服务（tools/agents/sessions/sessionProjections/systemPrompt）', () => {
-  assert.deepEqual(host.inject, ['tools', 'agents', 'sessions', 'sessionProjections', 'systemPrompt'])
+check('inject 声明了 tools、且没有多余依赖', () => {
+  assert.deepEqual(host.inject, ['tools'])
   assert.equal(host.name, 'dsh-memory')
 })
 
@@ -337,12 +334,6 @@ check('project 作用域用会话 cwd 定位', () => {
   const projects = fs.readdirSync(path.join(home, 'projects'))
   assert.equal(projects.length, 1)
   assert.ok(fs.existsSync(path.join(home, 'projects', projects[0], 'MEMORY.md')))
-  // 新行为：项目条目要按工作区注入 → 写进 <cwd>/AGENTS.local.md 的托管区块
-  const wsFile = path.join(cwd, 'AGENTS.local.md')
-  assert.ok(fs.existsSync(wsFile), '项目写入后应生成工作区指令文件')
-  const wsText = fs.readFileSync(wsFile, 'utf8')
-  assert.match(wsText, /<!-- dsh-memory-project:begin -->/)
-  assert.match(wsText, /decisions\/use-httpx\.md/)
 })
 
 check('search 的 auto 同时覆盖项目与全局', () => {
@@ -570,7 +561,7 @@ async function main() {
     assert.equal(r.json.target, 'ui/from-settings-page.md')
     assert.ok(fs.existsSync(path.join(home, 'ui', 'from-settings-page.md')))
     const agents = fs.readFileSync(agentsPath, 'utf8')
-    assert.match(agents, /工具配置\*\*（\d+ 条）/, 'AGENTS.md 区块应同步（分组地图）')
+    assert.match(agents, /设置页写入/, 'AGENTS.md 区块应同步')
     const list = await get('/memory-api/list', '/memory-api/list?scope=global')
     assert.ok(list.json.entries.some((e) => e.target === 'ui/from-settings-page.md'), '新条目应出现在索引里')
   })
@@ -701,59 +692,6 @@ async function main() {
   })
 
   fs.rmSync(root, { recursive: true, force: true })
-
-  // ---------------------------------------------------------------- 真挂载一遍（2026-10-09 补）
-  // 为什么必须补：上面的夹具 ctx **没有 `on`、也没有 `systemPrompt`**，于是三条注入通道
-  // （L1 钩子 / 压缩保护段 / 记忆索引段与 context）**从来没被跑过** —— 当天两次「作用域错位」
-  // （invalidatePromptCache is not defined、contextChannelProven is not defined）就是这样
-  // 一路溜到真机、把整轮搞失败的。这条检查用**独立的假 ctx**（不动上面那个，避免影响
-  // fileBlocksEnabled 的默认值）把插件真的挂一遍，再调用注册进去的 text 函数。
-  check('真挂载一遍：注册三条注入通道，且段/context 的 text 函数能跑不抛', () => {
-    const altRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-inject-'))
-    const altHome = path.join(altRoot, 'memory')
-    const altAgents = path.join(altRoot, 'AGENTS.md')
-    const altCwd = path.join(altRoot, 'workspace')
-    fs.mkdirSync(altCwd, { recursive: true })
-    const seen = { section: [], context: [], on: [] }
-    const altCtx = {
-      logger: { info() {}, warn() {}, error() {} },
-      effect: (fn) => { const d = fn(); return typeof d === 'function' ? d : () => {} },
-      inject: (deps, cb) => cb(altCtx),
-      webServer: makeWebServer(new Map()),
-      tools: { register: () => () => {} },
-      on: (ev, fn) => { seen.on.push({ ev, fn }); return () => {} },
-      systemPrompt: {
-        section: (s) => { seen.section.push(s); return () => {} },
-        context: (c) => { seen.context.push(c); return () => {} }
-      }
-    }
-    host.applyInner(altCtx, { home: altHome, agentsPath: altAgents, promptInjection: {}, syncOnStartup: false })
-
-    // ① 全局 L0 段：text 是函数，调用它 = 走 renderGlobal → cwdOf（作用域/属性门控类错误会在这里炸）
-    const indexSection = seen.section.find((s) => s.name === 'dsh-memory:index')
-    assert.ok(indexSection, '应注册 dsh-memory:index 段')
-    assert.equal(indexSection.interpolate, false, '段文本不该参与变量插值')
-    const sectionText = indexSection.text({ agent: {}, scope: {} })
-    assert.equal(typeof sectionText, 'string')
-    assert.match(sectionText, /长期记忆库/, '段文本应含记忆库标题')
-    assert.equal(sectionText.includes('dsh-memory:begin'), false, '段文本不该带文件区块标记')
-
-    // ② 工作区 context：无 cwd 返回空串；给 cwd 要产出文本（renderProject 里的作用域错误在此暴露）
-    const projectCtx = seen.context.find((c) => c.name === 'dsh-memory:project')
-    assert.ok(projectCtx, '应注册 dsh-memory:project context')
-    assert.equal(projectCtx.text({ agent: {}, scope: {} }), '')
-    assert.ok(projectCtx.text({ agent: { session: { header: { cwd: altCwd } } } }).length > 0, '给了 cwd 应产出工作区文本')
-
-    // ③ 压缩保护段与 L1 钩子都在，钩子对"工具续跑步骤"应当原样返回 decision
-    assert.ok(seen.section.find((s) => s.name === 'dsh-memory:compaction-guard'), '应注册压缩保护段')
-    const hook = seen.on.find((x) => x.ev === 'agent/pre-step')
-    assert.ok(hook, '应注册 agent/pre-step 钩子')
-    const decision = { kind: 'enter', messages: [] }
-    const out = hook.fn({ messages: [], step: 1, agent: { session: { header: { id: 's1', cwd: altCwd } } } }, async () => decision)
-    assert.ok(out && typeof out.then === 'function', 'L1 钩子应返回 promise')
-    out.catch(() => { /* 异步分支的错误由下面的 await 检查兜 */ })
-    fs.rmSync(altRoot, { recursive: true, force: true })
-  })
 
   console.log(`\n${passed} 项通过，${failures.length} 项失败。\n`)
   if (failures.length) {
