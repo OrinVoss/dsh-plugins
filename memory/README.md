@@ -498,6 +498,27 @@ This file changed after it was loaded. Use the following content instead of the 
 - **测试注意**：假 session 的 cwd 必须是临时目录——用真实工作区路径会把测试夹具写进开发者的仓库
   （2026-10-09 真漏过一次，`plugintest.cjs` / `selfcheck.cjs` 已改用 `mkdtemp`）。
 
+### 12.2 L1 检索注入（2026-10-09 新增）
+
+L0 把逐条索引换成了规则 + 地图，代价是"细节要靠模型自己搜"。实测 456 个被注入会话里
+**86.2% 一次都没搜过**；48 条从未被读的条目里 **41 条主题在会话里出现过**（投递失败）。
+所以 L1 把"模型想起来搜"换成"相关记忆自动出现"：
+
+- **钩子**：`ctx.on("agent/pre-step", async (payload, next) => …)`。**必须在 `inject` 里声明 `agents`**，
+  否则钩子注册成功但永远不触发（原来只声明 `tools`，实测踩到）。
+- **时机**：只在**用户轮次**注入（`payload.messages` 里出现新的 user 消息）；工具续跑步骤直接返回，
+  既省 token 也让前缀保持稳定。
+- **流程**：取本轮用户消息（剥掉 `<system-reminder>` 与指令块）→ `search(project)` + `search(global)`
+  → `lib/retrieve.js` 的 `pickHits` 按 `k/minScore/maxBytes/seen` 挑 → `renderInjection` 渲染 →
+  以 `{content:[{type:"text",text}]}`（与 DSH inbox 用户消息同构）追加到本轮消息。
+- **三条硬约束**（都是为了不破坏前缀缓存，实测缓存命中率 96.9%、前缀可达 20 万 token）：
+  ①只追加，绝不改写/删除已注入消息；②内容确定性；③会话内去重（同一条目只注一次）。
+- **配置**：`retrieve: {enabled, k, minScore, maxBytes, log}`（默认 3 / 8 / 2000 / 开）。
+  `enabled: false` 只关 L1；`blockMode: full` 只关 L0——两级都能单独回滚。
+- **降级**：钩子注册失败或本轮异常 → 记 warn 并原样返回，L0 照常工作。
+- **注入日志**：`%LOCALAPPDATA%\Temp\dsh-memory-l1.log`（每次用户轮记 `no-hit` 或 `inject`+targets），
+  是 A/B 验证"搜索率/命中率有没有改善"的数据源。
+
 ## 13. 自动提交（`autoCommit`）
 
 `memory_write` / `memory_forget` / 设置页保存与删除落盘后，会在记忆根跑一次
