@@ -907,6 +907,15 @@ check('seenWithin：窗口内的算已见过，窗口外的过期', () => {
   assert.deepEqual([...r.seenWithin(new Map(), 5, 60)], [])
 })
 
+check('effectiveLength：短消息判得出、标点空白不计', () => {
+  const r = require('./lib/retrieve')
+  assert.equal(r.effectiveLength('ok'), 2)
+  assert.equal(r.effectiveLength('继续'), 2)
+  assert.equal(r.effectiveLength('ok!? '), 2)
+  assert.ok(r.effectiveLength('口播混音怎么配比呢？') >= 4, '正常问句要够长')
+  assert.equal(r.effectiveLength(''), 0)
+  assert.equal(r.effectiveLength(null), 0)
+})
 check('line() 对补送行原样复用（压缩后补送的确定性）', () => {
   const r = require('./lib/retrieve')
   const restored = { restored: true, title: '- 某条（`a/b.md`）—— 摘要' }

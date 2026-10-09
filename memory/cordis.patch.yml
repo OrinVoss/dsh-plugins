@@ -28,6 +28,8 @@
           k: 3
           minScore: 8
           maxBytes: 2000
+          # 查询有效长度（去标点空白）低于此值不注入：「继续」「ok」这类短消息检索必出噪声
+          minQueryChars: 4
           # 去重：主触发器是「压缩事件」（压缩会把旧消息 shadow 掉，那时必须允许重送）。
           # clearOnCompaction=false 可关掉；repeatAfterSteps 只是兜底窗口（默认 60）。
           clearOnCompaction: true

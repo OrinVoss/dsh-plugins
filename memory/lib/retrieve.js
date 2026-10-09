@@ -1,6 +1,6 @@
 'use strict'
 // 改动后请递增：host.js 会把版本号打进注入日志，用来确认"跑的是哪一版"（require 缓存坑）。
-const VERSION = 4
+const VERSION = 5
 // L1 的纯逻辑：从检索结果里挑要注入的条目、渲染成一段文本。
 // 抽出来是为了可测（selfcheck），host.js 只负责挂钩子与搬运。
 //
@@ -50,6 +50,15 @@ function seenWithin(injected, stepNo, window) {
   return out
 }
 
+/**
+ * 查询的"有效长度"：去掉标点与空白后的字符数。
+ * 为什么需要：像「继续」「ok」这种 1–2 字的消息，关键词检索必然返回噪声，
+ * 却仍可能过 minScore → 注入一堆不相关条目（2026-10-09 统计发现 3 次注入里 2 次是垃圾）。
+ */
+function effectiveLength(query) {
+  return String(query == null ? '' : query).replace(/[\s\p{P}\p{S}]/gu, '').length
+}
+
 /** 一条注入行的渲染（确定性：只依赖 hit 自身） */
 function line(hit) {
   if (hit && hit.restored) return hit.title   // 补送的行本来就是渲染好的原文，原样复用（确定性）
@@ -95,4 +104,4 @@ function renderInjection(picked) {
   ].join('\n')
 }
 
-module.exports = { userTurnText, pickHits, renderInjection, line, seenWithin, VERSION }
+module.exports = { userTurnText, pickHits, renderInjection, line, seenWithin, effectiveLength, VERSION }

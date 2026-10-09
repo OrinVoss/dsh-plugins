@@ -590,7 +590,9 @@ function applyHttp(ctx, store, cfg) {
     maxBytes: Number.isFinite(retrieveCfg.maxBytes) && retrieveCfg.maxBytes > 0 ? Math.floor(retrieveCfg.maxBytes) : 2000,
     // 同一条目多久之后允许再次注入（按 step 计）。会话内永久去重是错的：DSH 会压缩长会话，
     // 几十轮前注入的条目可能已不在上下文里，却仍被永久抑制（2026-10-09 实测遇到）。
-    repeatAfterSteps: Number.isFinite(retrieveCfg.repeatAfterSteps) && retrieveCfg.repeatAfterSteps >= 0 ? Math.floor(retrieveCfg.repeatAfterSteps) : 60
+    repeatAfterSteps: Number.isFinite(retrieveCfg.repeatAfterSteps) && retrieveCfg.repeatAfterSteps >= 0 ? Math.floor(retrieveCfg.repeatAfterSteps) : 60,
+    // 查询有效长度（去标点空白）低于这个值就不注入 —— 「继续」「ok」这类短消息检索必出噪声
+    minQueryChars: Number.isFinite(retrieveCfg.minQueryChars) && retrieveCfg.minQueryChars >= 0 ? Math.floor(retrieveCfg.minQueryChars) : 4
   }
   // 压缩后清空注入记账：压缩会把旧消息 shadow 掉（compaction/prune 的 shadowedSeqs），
   // 那些"我送过了"的内容可能已经不在上下文里 —— 这时必须允许重新送（2026-10-09 实测：
@@ -641,6 +643,11 @@ function applyHttp(ctx, store, cfg) {
           const query = retrieve.userTurnText(list)
           // 工具续跑步骤没有新用户消息 → 不注入（省 token，也让前缀保持稳定）
           if (!query) return decision
+          // 太短的消息（「继续」「ok」）关键词检索必出噪声 → 直接跳过，别注入垃圾
+          if (retrieve.effectiveLength(query) < RETRIEVE.minQueryChars) {
+            logInject({ ev: 'skip-short-query', sessionId: (payload.agent && payload.agent.session && payload.agent.session.header && payload.agent.session.header.id) || 'default', query: query.slice(0, 40), len: retrieve.effectiveLength(query) })
+            return decision
+          }
           if (!decision || !Array.isArray(decision.messages)) return decision
           const header = (payload.agent && payload.agent.session && payload.agent.session.header) || {}
           const sessionId = header.id || 'default'
@@ -670,7 +677,7 @@ function applyHttp(ctx, store, cfg) {
             logInject({ ev: 'restore-after-compaction', sessionId, restored: picked.picked.filter((p) => p.restored).length })
           }
           if (!picked.picked.length) {
-            logInject({ ev: 'no-hit', sessionId, query: query.slice(0, 120) })
+            logInject({ ev: 'no-hit', sessionId, query: query.slice(0, 120), scores: groups.map((g) => ({ scope: g && g.scope, top: (g && g.results || []).slice(0, 3).map((x) => x.score) })) })
             return decision
           }
           for (const p of picked.picked) injectedMap.set(p.target, stepNo)
@@ -688,7 +695,7 @@ function applyHttp(ctx, store, cfg) {
           const injected = { content: [{ type: 'text', text }], source }
           const lastClaimed = decision.messages.findLastIndex((m) => list.includes(m))
           const at = lastClaimed < 0 ? 0 : lastClaimed + 1
-          logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), query: query.slice(0, 120), sourceKind: source.kind, sourceKeys: Object.keys(source) })
+          logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), scores: picked.picked.map((p) => p.score), query: query.slice(0, 120), sourceKind: source.kind, sourceKeys: Object.keys(source) })
           // 等 session/event 把这条消息的日志 seq 报回来（见下面的监听）
           pendingLines.push({ sessionId, lines })
           return Object.assign({}, decision, { messages: decision.messages.toSpliced(at, 0, injected) })
@@ -780,3 +787,4 @@ module.exports = {
 // remount #21 (freshRequire fixed)
 // remount #22 (all lib via freshRequire)
 // remount #23 (shadow reinject)
+// remount #24 (short query guard)
