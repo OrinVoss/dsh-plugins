@@ -27,7 +27,10 @@ function check(label, fn) {
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-selfcheck-'))
 const home = path.join(root, 'memory')
 const agents = path.join(root, 'AGENTS.md')
-const cwd = 'D:\\桌面\\编程作品\\马具对比\\DeepSeek Harness'
+// 假 cwd 用临时目录：注入工作区记忆区块的代码会写 <cwd>/AGENTS.local.md，
+// 用真实工作区路径会把测试夹具泄漏到开发者的仓库里（2026-10-09 真漏过一次）。
+const cwd = path.join(root, 'workspace')
+fs.mkdirSync(cwd, { recursive: true })
 
 console.log(`\n临时目录：${root}\n`)
 const store = storeLib.createStore({ home, agentsPath: agents, maxBlockBytes: 20000 })
@@ -423,8 +426,8 @@ check('首次同步创建 AGENTS.md 与托管区块', () => {
   assert.match(text, /^# 全局指令/)
   assert.ok(text.includes(storeLib.BLOCK_BEGIN))
   assert.ok(text.includes(storeLib.BLOCK_END))
-  assert.match(text, /### 全局记忆索引/)
-  assert.match(text, /Git 只做本地提交/)
+  assert.match(text, /### 一、动手前先查记忆/)
+  assert.match(text, /### 三、库里还有什么/)
   assert.match(text, /memory_write/)
 })
 
@@ -482,7 +485,7 @@ check('保留用户自己写在区块外的内容', () => {
   const after = fs.readFileSync(agents, 'utf8')
   assert.match(after, /## 我自己的硬规则/)
   assert.match(after, /- 回复用简体中文。/)
-  assert.match(after, /代理在 127\.0\.0\.1:10808/, '新记忆应已同步进区块')
+  assert.match(after, /本机与网络\*\*（\d+ 条）/, '新记忆应已同步进分组地图')
   assert.equal(after.split(storeLib.BLOCK_BEGIN).length - 1, 1, '托管区块只能有一个')
   assert.equal(after.split(storeLib.BLOCK_END).length - 1, 1)
 })
@@ -501,7 +504,8 @@ check('用户提前写好别的 AGENTS.md 时，区块追加而不是覆盖', ()
 
 check('索引超预算时区块被截断且给出提示', () => {
   const bigHome = path.join(root, 'memory-big')
-  const big = storeLib.createStore({ home: bigHome, agentsPath: path.join(root, 'AGENTS3.md') })
+  // 截断只发生在 full（逐条索引）模式；layered 模式结构固定、不会截断
+  const big = storeLib.createStore({ home: bigHome, agentsPath: path.join(root, 'AGENTS3.md'), blockMode: 'full' })
   for (let i = 0; i < 40; i++) {
     big.write('global', {
       name: `bulk/entry-${i}`,
@@ -514,6 +518,7 @@ check('索引超预算时区块被截断且给出提示', () => {
   const tiny = storeLib.createStore({
     home: bigHome,
     agentsPath: path.join(root, 'AGENTS4.md'),
+    blockMode: 'full',
     maxBlockBytes: 1200
   })
   const res = tiny.syncAgents(cwd)
@@ -676,6 +681,290 @@ check('parseEntry 兼容 CRLF：frontmatter 最后一行元数据不丢', () => 
   assert.equal(meta.scope, 'global', 'CRLF 下最后几行 scope 仍应解析')
   assert.equal(meta.updatedAt, '2026-10-01T00:00:00.000Z', 'CRLF 下 updatedAt 不应丢')
   assert.equal(body, '正文')
+})
+
+// ---------------------------------------------------------------- 工作区记忆注入
+
+check('buildProjectBlock 渲染托管区块与条目', () => {
+  const block = store.buildProjectBlock(cwd)
+  assert.match(block, /<!-- dsh-memory-project:begin -->/)
+  assert.match(block, /<!-- dsh-memory-project:end -->/)
+  assert.match(block, /### 工作区记忆索引/)
+  assert.match(block, /decisions\/api-gateway\.md/)
+  assert.match(block, /网关选型/)
+})
+
+check('buildProjectBlock 空索引给出可读占位', () => {
+  const c = path.join(root, 'ws-empty')
+  fs.mkdirSync(c, { recursive: true })
+  const block = store.buildProjectBlock(c)
+  assert.match(block, /还没有记忆条目/)
+})
+
+check('buildProjectBlock 超预算时截断并提示', () => {
+  const tinyHome = path.join(root, 'tiny-memory')
+  const tinyCwd = path.join(root, 'ws-tiny')
+  fs.mkdirSync(tinyCwd, { recursive: true })
+  const tiny = storeLib.createStore({ home: tinyHome, agentsPath: path.join(root, 'tiny-AGENTS.md'), maxProjectBlockBytes: 700 })
+  for (let i = 0; i < 8; i++) {
+    tiny.write('project', { name: `x/e${i}`, title: `条目${i}`, description: '描述'.repeat(20), body: 'b' }, tinyCwd)
+  }
+  const block = tiny.buildProjectBlock(tinyCwd)
+  assert.match(block, /索引超预算，此处省略/)
+})
+
+check('syncWorkspaceAgents 无项目条目时不建文件', () => {
+  const c = path.join(root, 'ws-none')
+  fs.mkdirSync(c, { recursive: true })
+  const res = store.syncWorkspaceAgents(c)
+  assert.equal(res.changed, false)
+  assert.equal(res.reason, 'no-project-index')
+  assert.ok(!fs.existsSync(path.join(c, 'AGENTS.local.md')))
+})
+
+check('syncWorkspaceAgents 有项目条目时写入工作区文件', () => {
+  const res = store.syncWorkspaceAgents(cwd)
+  assert.equal(res.changed, true)
+  const file = path.join(cwd, 'AGENTS.local.md')
+  assert.equal(res.path, file)
+  const text = fs.readFileSync(file, 'utf8')
+  assert.match(text, /decisions\/api-gateway\.md/)
+})
+
+check('syncWorkspaceAgents 幂等：内容不变时不动文件', () => {
+  const res = store.syncWorkspaceAgents(cwd)
+  assert.equal(res.changed, false)
+})
+
+check('syncWorkspaceAgents 不碰托管区块外的用户内容', () => {
+  const c = path.join(root, 'ws-user')
+  fs.mkdirSync(c, { recursive: true })
+  const file = path.join(c, 'AGENTS.local.md')
+  fs.writeFileSync(file, '# 我自己的说明\n\n别动这一段。\n', 'utf8')
+  store.write('project', { name: 'notes/a', title: 'A', description: 'd', body: 'b' }, c)
+  const res = store.syncWorkspaceAgents(c)
+  assert.equal(res.changed, true)
+  const text = fs.readFileSync(file, 'utf8')
+  assert.match(text, /# 我自己的说明/)
+  assert.match(text, /别动这一段。/)
+  assert.match(text, /notes\/a\.md/)
+})
+
+check('syncWorkspaceAgents 条目清空后摘区块并删空文件', () => {
+  const c = path.join(root, 'ws-clear')
+  fs.mkdirSync(c, { recursive: true })
+  store.write('project', { name: 'gone/x', title: 'X', description: 'd', body: 'b' }, c)
+  assert.equal(store.syncWorkspaceAgents(c).changed, true)
+  const file = path.join(c, 'AGENTS.local.md')
+  assert.ok(fs.existsSync(file))
+  store.forget('project', 'gone/x', c)
+  const res = store.syncWorkspaceAgents(c)
+  assert.equal(res.removed, true)
+  assert.ok(!fs.existsSync(file))
+})
+
+check('syncWorkspaceAgents 拒绝记忆根内部与相对路径', () => {
+  assert.equal(store.syncWorkspaceAgents(home).reason, 'inside-memory-home')
+  assert.equal(store.syncWorkspaceAgents('relative/path').reason, 'no-cwd')
+  assert.equal(store.syncWorkspaceAgents(null).reason, 'no-cwd')
+})
+
+check('injectProjectBlock:false 时完全不写工作区', () => {
+  const c = path.join(root, 'ws-off')
+  fs.mkdirSync(c, { recursive: true })
+  const off = storeLib.createStore({ home, agentsPath: agents, injectProjectBlock: false })
+  off.write('project', { name: 'off/y', title: 'Y', description: 'd', body: 'b' }, c)
+  assert.equal(off.syncWorkspaceAgents(c).reason, 'disabled')
+  assert.ok(!fs.existsSync(path.join(c, 'AGENTS.local.md')))
+})
+
+// ---------------------------------------------------------------- L0 分层注入（2026-10-09）
+
+check('blockMode:full 仍能渲染逐条索引（回滚路径不能坏）', () => {
+  const h = path.join(root, 'memory-fullmode')
+  const a = path.join(root, 'AGENTS-fullmode.md')
+  const s = storeLib.createStore({ home: h, agentsPath: a, blockMode: 'full' })
+  s.write('global', { name: 'tools/probe', title: '探针条目', description: '这是探针摘要', body: 'b' }, cwd)
+  s.syncAgents(cwd)
+  const text = fs.readFileSync(a, 'utf8')
+  assert.match(text, /### 全局记忆索引/)
+  assert.match(text, /这是探针摘要/)
+})
+
+check('layered 模式：触发规则 + 规则速查 + 分组地图，且不含逐条摘要', () => {
+  const h = path.join(root, 'memory-layered')
+  const a = path.join(root, 'AGENTS-layered.md')
+  const s = storeLib.createStore({ home: h, agentsPath: a, sectionHints: { 工具配置: 'DSH 插件 / kimi' } })
+  s.write('global', { name: 'tools/plain', title: '普通条目', description: '不该出现的逐条摘要', body: 'b', section: '工具配置' }, cwd)
+  s.write('global', { name: 'rules/one', title: '规则一', description: '规则摘要', body: 'b', section: '工具配置', always: true, digest: '课程代码语言先问，不默认' }, cwd)
+  s.syncAgents(cwd)
+  const text = fs.readFileSync(a, 'utf8')
+  assert.match(text, /### 一、动手前先查记忆/)
+  assert.match(text, /### 二、必须遵守的规则/)
+  assert.match(text, /- 课程代码语言先问，不默认/)
+  assert.match(text, /### 三、库里还有什么/)
+  assert.match(text, /工具配置\*\*（2 条）—— DSH 插件 \/ kimi/)
+  assert.ok(!text.includes('不该出现的逐条摘要'), '普通条目的摘要不该进 layered 区块')
+})
+
+check('alwaysRules 只取 always+digest 都齐的条目，且顺序稳定', () => {
+  const h = path.join(root, 'memory-always2')
+  const s = storeLib.createStore({ home: h, agentsPath: path.join(root, 'AGENTS-a2.md') })
+  s.write('global', { name: 'r/b', title: 'B', description: 'd', body: 'b', always: true, digest: '规则 B' }, cwd)
+  s.write('global', { name: 'r/a', title: 'A', description: 'd', body: 'b', always: true, digest: '规则 A' }, cwd)
+  s.write('global', { name: 'r/c', title: 'C', description: 'd', body: 'b', always: true }, cwd)
+  s.write('global', { name: 'r/d', title: 'D', description: 'd', body: 'b' }, cwd)
+  const rules = s.alwaysRules()
+  assert.equal(rules.length, 2, '缺 digest 的不算常驻规则')
+  assert.deepEqual(rules.map((r) => r.digest), ['规则 A', '规则 B'])
+  assert.ok(rules.every((r) => r.target.endsWith('.md')), '规则要带文件相对路径当键')
+})
+
+check('常驻规则用叶子名时也给出正确的路径键（命名不统一的坑）', () => {
+  const h = path.join(root, 'memory-leafname')
+  fs.mkdirSync(path.join(h, 'prefs'), { recursive: true })
+  const meta = {
+    name: 'leaf-rule', description: '叶子名规则', type: 'feedback', scope: 'global',
+    originSessionId: '', createdAt: '2026-10-09T00:00:00.000Z', updatedAt: '2026-10-09T00:00:00.000Z',
+    always: 'true', digest: '叶子名也要能进常驻'
+  }
+  fs.writeFileSync(path.join(h, 'prefs', 'leaf-rule.md'), storeLib.serializeEntry(meta, '正文'), 'utf8')
+  const s = storeLib.createStore({ home: h, agentsPath: path.join(root, 'AGENTS-leaf.md') })
+  const rules = s.alwaysRules()
+  assert.equal(rules.length, 1)
+  assert.equal(rules[0].target, 'prefs/leaf-rule.md', '叶子名条目也要给出正确的相对路径键')
+  assert.equal(rules[0].digest, '叶子名也要能进常驻')
+})
+
+check('always/digest 能穿过 overwrite 往返（不许静默丢字段）', () => {
+  const h = path.join(root, 'memory-rt')
+  const s = storeLib.createStore({ home: h, agentsPath: path.join(root, 'AGENTS-rt.md') })
+  const f = path.join(h, 'rules', 'probe.md')
+  s.write('global', { name: 'rules/probe', title: '探针', description: 'd', body: 'b', always: true, digest: '常驻规则' }, cwd)
+  let meta = storeLib.parseEntry(fs.readFileSync(f, 'utf8')).meta
+  assert.equal(meta.always, 'true')
+  assert.equal(meta.digest, '常驻规则')
+  s.write('global', { name: 'rules/probe', title: '探针', description: 'd2', body: 'b2', overwrite: true }, cwd)
+  meta = storeLib.parseEntry(fs.readFileSync(f, 'utf8')).meta
+  assert.equal(meta.always, 'true', 'overwrite 漏传时 always 应沿用旧值')
+  assert.equal(meta.digest, '常驻规则', 'overwrite 漏传时 digest 应沿用旧值')
+  s.write('global', { name: 'rules/probe', title: '探针', description: 'd3', body: 'b3', overwrite: true, always: false }, cwd)
+  meta = storeLib.parseEntry(fs.readFileSync(f, 'utf8')).meta
+  assert.equal(meta.always, undefined, '显式关掉后不该再写 always')
+})
+
+// ---------------------------------------------------------------- L1 检索注入的纯逻辑
+
+check('userTurnText 取最后一条用户消息，并剥掉注入块', () => {
+  const r = require('./lib/retrieve')
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: '第一轮' }] },
+    { role: 'assistant', content: [{ type: 'text', text: '回答' }] },
+    { role: 'user', content: [{ type: 'text', text: '<system-reminder>注入的索引</system-reminder>帮我做个 PPT' }] }
+  ]
+  assert.equal(r.userTurnText(messages), '帮我做个 PPT')
+})
+
+check('userTurnText 在工具续跑步骤返回空（不注入）', () => {
+  const r = require('./lib/retrieve')
+  assert.equal(r.userTurnText([]), '')
+  assert.equal(r.userTurnText([{ role: 'assistant', content: [{ type: 'text', text: 'x' }] }]), '')
+  assert.equal(r.userTurnText(null), '')
+})
+
+check('pickHits 遵守 k / minScore / seen / 作用域优先级', () => {
+  const r = require('./lib/retrieve')
+  const groups = [
+    { scope: 'project', results: [{ target: 'p/a.md', title: 'A', summary: 's', score: 30 }] },
+    { scope: 'global', results: [
+      { target: 'g/low.md', title: 'L', summary: 's', score: 2 },
+      { target: 'g/b.md', title: 'B', summary: 's', score: 20 },
+      { target: 'g/c.md', title: 'C', summary: 's', score: 18 }
+    ] }
+  ]
+  const out = r.pickHits(groups, { k: 2, minScore: 8 })
+  assert.deepEqual(out.picked.map((x) => x.target), ['p/a.md', 'g/b.md'], '项目优先、低分被挡、k 生效')
+  const out2 = r.pickHits(groups, { k: 3, minScore: 8, seen: new Set(['p/a.md']) })
+  assert.deepEqual(out2.picked.map((x) => x.target), ['g/b.md', 'g/c.md'], 'seen 里的不再注入')
+})
+
+check('pickHits 遵守 maxBytes（宁可少注也不超）', () => {
+  const r = require('./lib/retrieve')
+  const big = '长'.repeat(200)
+  const groups = [{ scope: 'global', results: [
+    { target: 'g/a.md', title: 'A', summary: big, score: 20 },
+    { target: 'g/b.md', title: 'B', summary: '短', score: 19 }
+  ] }]
+  const out = r.pickHits(groups, { k: 3, minScore: 8, maxBytes: 200 })
+  assert.deepEqual(out.picked.map((x) => x.target), ['g/b.md'], '超预算的那条跳过，后面的仍可入选')
+})
+
+check('seenWithin：窗口内的算已见过，窗口外的过期', () => {
+  const r = require('./lib/retrieve')
+  const injected = new Map([['a.md', 10], ['b.md', 24], ['c.md', 0]])
+  assert.deepEqual([...r.seenWithin(injected, 26, 15)].sort(), ['b.md'], '26-10=16 过期、26-24=2 在窗口内')
+  assert.deepEqual([...r.seenWithin(injected, 26, 0)], [], '窗口 <=0 = 只看压缩，不看窗口')
+  assert.deepEqual([...r.seenWithin(new Map(), 5, 60)], [])
+})
+
+check('effectiveLength：短消息判得出、标点空白不计', () => {
+  const r = require('./lib/retrieve')
+  assert.equal(r.effectiveLength('ok'), 2)
+  assert.equal(r.effectiveLength('继续'), 2)
+  assert.equal(r.effectiveLength('ok!? '), 2)
+  assert.ok(r.effectiveLength('口播混音怎么配比呢？') >= 4, '正常问句要够长')
+  assert.equal(r.effectiveLength(''), 0)
+  assert.equal(r.effectiveLength(null), 0)
+})
+check('line() 对补送行原样复用（压缩后补送的确定性）', () => {
+  const r = require('./lib/retrieve')
+  const restored = { restored: true, title: '- 某条（`a/b.md`）—— 摘要' }
+  assert.equal(r.line(restored), '- 某条（`a/b.md`）—— 摘要')
+  assert.match(r.renderInjection([restored]), /a\/b\.md/)
+})
+check('renderInjection 确定性、且给出 name 供 memory_read', () => {
+  const r = require('./lib/retrieve')
+  const picked = [{ target: 'tools/x.md', title: 'X', summary: '摘要' }]
+  const a = r.renderInjection(picked)
+  const b = r.renderInjection(picked)
+  assert.equal(a, b, "同一输入必须同一输出（前缀缓存友好）")
+  assert.match(a, /tools\/x\.md/)
+  assert.match(a, /memory_read/)
+  assert.equal(r.renderInjection([]), '')
+})
+
+// ---------------------------------------------------------------- 防文档漂移
+
+check('cordis.patch.yml 里的配置键都在 README 登记了（防配置漂移）', () => {
+  const yml = fs.readFileSync(path.join(__dirname, 'cordis.patch.yml'), 'utf8')
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8')
+  // 配置块里的顶层键缩进 8 空格（retrieve 的子键缩进 10，不算顶层）
+  const keys = [...yml.matchAll(/^ {8}([A-Za-z][A-Za-z0-9]*):/gm)].map((m) => m[1])
+  assert.ok(keys.length >= 8, '应能解析出配置键，实际 ' + keys.length + ' 个')
+  const missing = keys.filter((k) => !readme.includes('`' + k + '`'))
+  assert.deepEqual(missing, [], 'README §5.3 没登记的配置键：' + missing.join('、'))
+})
+
+check('README 记录的注入消息形状与代码一致（防形状漂移）', () => {
+  const host = fs.readFileSync(path.join(__dirname, 'host.js'), 'utf8')
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8')
+  const kind = /kind: '([a-z0-9-]+)'/.exec(host.split('const source =')[1] || '')
+  assert.ok(kind, '应能从 host.js 里取出注入消息的 source.kind')
+  assert.ok(readme.includes(kind[1]), 'README §12.2 没写出注入的 source.kind：' + kind[1])
+  assert.ok(readme.includes('source'), 'README §12.2 应说明注入消息必须带 source')
+})
+
+check('压缩保护段：含记忆标记与 Critical Context、确定性、够短', () => {
+  const g = require('./lib/compaction-guard')
+  assert.ok(g.VERSION >= 1)
+  assert.match(g.TEXT, /（dsh-memory 自动检索：/, '要能认住 L1 注入的那条消息的开头')
+  assert.match(g.TEXT, /Critical Context/, '要指名写进哪一节')
+  assert.match(g.TEXT, /verbatim/, '要要求原样保留')
+  assert.equal(g.TEXT, require('./lib/compaction-guard').TEXT, '同一模块两次取值必须一致（前缀缓存友好）')
+  assert.ok(g.DEFAULT_ORDER > 10200, '段顺序要排在第一方内容之后')
+  assert.match(g.SECTION_NAME, /^dsh-memory:/)
+  assert.ok(Buffer.byteLength(g.TEXT, 'utf8') < 800, '段文本每次请求都会重复，必须短')
+  assert.equal(g.TEXT.includes('{{'), false, '段内不要出现会被插值的 {{ }}')
 })
 
 // ---------------------------------------------------------------- 结果
