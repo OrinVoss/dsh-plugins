@@ -622,11 +622,17 @@ function applyHttp(ctx, store, cfg) {
           if (injectedBySession.size > 50) injectedBySession.delete(injectedBySession.keys().next().value)
           injectedBySession.set(sessionId, injectedMap)
           const text = retrieve.renderInjection(picked.picked)
-          // 消息形状与 DSH 自己的用户轮消息同构（实测 agent/inbox/spliced 里就是 {content:[{type,text}]}）
-          const injected = { content: [{ type: 'text', text }] }
+          // 消息形状：**必须带 source**。只给 {content:[...]} 会让框架在 message.source.kind 上
+          // 抛 "Cannot read properties of undefined (reading 'kind')"，整轮崩掉（2026-10-09 实测，
+          // 用户的提问因此没被收到）。这里按官方指令加载器的形状构造，并优先用**真实用户消息的
+          // source 做模板**（它一定是框架认得的形状），失败才退回固定形状。
+          // 形状依据：官方指令加载器构造的是 {content, source:{kind, form, changes}}；
+          // 自定义 kind 在生产里可行（agent-team-plus 用 kind:"team-message"）。
+          const source = { kind: 'dsh-memory-retrieval', form: 'retrieval', changes: [] }
+          const injected = { content: [{ type: 'text', text }], source }
           const lastClaimed = decision.messages.findLastIndex((m) => list.includes(m))
           const at = lastClaimed < 0 ? 0 : lastClaimed + 1
-          logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), query: query.slice(0, 120) })
+          logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), query: query.slice(0, 120), sourceKind: source.kind, sourceKeys: Object.keys(source) })
           return Object.assign({}, decision, { messages: decision.messages.toSpliced(at, 0, injected) })
         } catch (err) {
           try { ctx.logger.warn('dsh-memory: L1 注入失败（本轮跳过）: %o', err) } catch (_) { /* 降级 */ }
@@ -679,3 +685,5 @@ module.exports = {
 // remount #12 (fix dup const)
 // remount #13 (compaction trigger)
 // remount #14 (brace fix)
+// remount #15 (fix source field)
+// remount #16 (explicit source shape)
