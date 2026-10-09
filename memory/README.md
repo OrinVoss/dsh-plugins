@@ -480,6 +480,24 @@ This file changed after it was loaded. Use the following content instead of the 
 | `maxBlockBytes: 8192` | 每次重注入的份量变小 | 索引不全，需检索补足 |
 | 把写记忆集中在会话开头 | 天然只有 1–2 次重注入 | 靠习惯 |
 
+### 12.1 工作区记忆区块（2026-10-09 新增）
+
+全局 `~/.dsh/AGENTS.md` 是所有工作区**共用**的，塞不进 per-workspace 内容；而 DSH 的
+`dsh-agent-instructions` 会按 `projectRoot→cwd` 逐级读工作区自己的 `AGENTS.md` / `AGENTS.local.md`
+（`.local` 变体是**独立候选**，不需要 base 文件存在）。所以项目索引写进**工作区自己的**指令文件：
+
+- **渲染**：`buildProjectBlock(cwd)` —— 与全局区块同构，标记是 `<!-- dsh-memory-project:begin/end -->`，
+  预算独立（`maxProjectBlockBytes`，默认 8192）。
+- **落盘**：`syncWorkspaceAgents(cwd)`，由 `host.js` 的 `sync(cwd)` 在 `memory_write` / `memory_forget`
+  之后调用（**只有拿到会话 cwd 时才写**；设置页那条路径只有 key、没有 cwd，故不动工作区文件）。
+- **默认文件 `AGENTS.local.md`**：独立生效，且按惯例不进版本控制，避免把生成物塞进用户的仓库；
+  想让它进仓库就把 `projectBlockFile` 改成 `AGENTS.md`。
+- **三条安全约定**：①只动托管区块，区块外一个字不改；②本工作区没有项目条目**且**文件里没有托管区块时
+  **什么都不做**（不在用户仓库里凭空建文件）；③条目删空后摘掉区块，文件因此变空则删掉文件。
+- **关掉**：`injectProjectBlock: false`。
+- **测试注意**：假 session 的 cwd 必须是临时目录——用真实工作区路径会把测试夹具写进开发者的仓库
+  （2026-10-09 真漏过一次，`plugintest.cjs` / `selfcheck.cjs` 已改用 `mkdtemp`）。
+
 ## 13. 自动提交（`autoCommit`）
 
 `memory_write` / `memory_forget` / 设置页保存与删除落盘后，会在记忆根跑一次

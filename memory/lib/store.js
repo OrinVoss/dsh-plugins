@@ -38,6 +38,10 @@ const BLOCK_END = '<!-- dsh-memory:end -->'
 const INDEX_FILE = 'INDEX.md'
 const PROJECT_INDEX_FILE = 'MEMORY.md'
 const PROJECTS_DIR = 'projects'
+// 工作区记忆区块的标记：与全局区块分开，两者写在不同文件里（全局 ~/.dsh/AGENTS.md，
+// 工作区 <cwd>/AGENTS.local.md），互不覆盖。
+const PROJECT_BLOCK_BEGIN = '<!-- dsh-memory-project:begin -->'
+const PROJECT_BLOCK_END = '<!-- dsh-memory-project:end -->'
 const ENTRY_TYPES = ['reference', 'feedback', 'project', 'workflow', 'fact']
 const SCOPES = ['global', 'project']
 const DEFAULT_SECTION = '其他'
@@ -471,6 +475,13 @@ function createStore(options) {
     ? Math.floor(opts.maxBlockBytes)
     : 20000
   // 落盘后自动本地提交（只 commit、不 push）。默认开；home 不是 git 仓库时自动跳过。
+  // 工作区记忆区块：默认写 <cwd>/AGENTS.local.md（DSH 会独立扫描 .local 变体，
+  // 且它按惯例不进版本控制，避免把生成物塞进用户的仓库）。
+  const injectProjectBlock = opts.injectProjectBlock !== false
+  const projectBlockFile = String(opts.projectBlockFile || 'AGENTS.local.md').trim() || 'AGENTS.local.md'
+  const maxProjectBlockBytes = Number.isFinite(opts.maxProjectBlockBytes) && opts.maxProjectBlockBytes > 0
+    ? Math.floor(opts.maxProjectBlockBytes)
+    : 8192
   const autoCommit = opts.autoCommit !== false
   const commitTimeoutMs = Number.isFinite(opts.commitTimeoutMs) && opts.commitTimeoutMs > 0
     ? Math.floor(opts.commitTimeoutMs)
@@ -897,10 +908,97 @@ function createStore(options) {
     return { path: agentsPath, changed: next !== current, bytes: Buffer.byteLength(next, 'utf8') }
   }
 
+  /**
+   * 渲染「工作区记忆」区块：只对当前工作区成立的条目索引。
+   *
+   * 为什么要单独一个区块：全局 `~/.dsh/AGENTS.md` 是所有工作区共用的，塞不进 per-workspace
+   * 内容；DSH 的 `dsh-agent-instructions` 会按 projectRoot→cwd 逐级读 `AGENTS.md` /
+   * `AGENTS.local.md`，所以项目索引必须写进**工作区自己的**指令文件才会被注入。
+   */
+  function buildProjectBlock(cwdOrKey) {
+    const p = listIndex('project', cwdOrKey)
+    const lines = []
+    lines.push(PROJECT_BLOCK_BEGIN)
+    lines.push('## 工作区记忆（dsh-memory 自动维护，请勿手改本区块）')
+    lines.push('')
+    lines.push(`- 只对**本工作区**成立的记忆（键 \`${p.key}\`）；换个工作区就不成立，所以不放进全局 AGENTS.md。`)
+    lines.push('- 取细节：`memory_search` / `memory_read`（给 name 或关键词），或直接 `read` 下面的路径。')
+    lines.push('')
+    lines.push('### 工作区记忆索引')
+    lines.push('')
+    const headerBytes = Buffer.byteLength(lines.join('\n'), 'utf8')
+    const budget = Math.max(256, maxProjectBlockBytes - headerBytes - 128)
+    const bodyLines = p.entries.length
+      ? p.entries.map((e) => `- [${e.title}](${e.target})${e.summary ? ` — ${e.summary}` : ''}` +
+          (e.section && e.section !== DEFAULT_SECTION ? `　\`${e.section}\`` : ''))
+      : ['（空——本工作区还没有记忆条目）']
+    const kept = []
+    let used = 0
+    let truncated = false
+    for (const line of bodyLines) {
+      const size = Buffer.byteLength(line, 'utf8') + 1
+      if (used + size > budget && kept.length > 0) { truncated = true; break }
+      kept.push(line)
+      used += size
+    }
+    lines.push(kept.join('\n'))
+    if (truncated) {
+      lines.push(`（索引超预算，此处省略 ${bodyLines.length - kept.length} 条；完整内容见 \`${path.join(p.dir, PROJECT_INDEX_FILE)}\`）`)
+    }
+    lines.push(PROJECT_BLOCK_END)
+    return lines.join('\n')
+  }
+
+  /**
+   * 把工作区记忆区块同步进工作区的指令文件（默认 `AGENTS.local.md`）。
+   *
+   * 三条安全约定：
+   *  1. 只动 begin/end 之间的托管区块，**区块外一个字不改**；
+   *  2. 本工作区没有项目条目、且文件里也没有托管区块 → 什么都不做（不在用户仓库里凭空建文件）；
+   *  3. 项目条目被删空 → 摘掉托管区块；文件若因此变空则删掉文件。
+   */
+  function syncWorkspaceAgents(cwd) {
+    if (!injectProjectBlock) return { changed: false, reason: 'disabled' }
+    const raw = cwd === null || cwd === undefined ? '' : String(cwd).trim()
+    if (!raw || !path.isAbsolute(raw)) return { changed: false, reason: 'no-cwd' }
+    const dir = path.resolve(raw)
+    if (dir === home || dir.startsWith(home + path.sep)) return { changed: false, reason: 'inside-memory-home' }
+    let p
+    try { p = listIndex('project', dir) } catch (err) { return { changed: false, reason: 'bad-key' } }
+    const file = path.join(dir, projectBlockFile)
+    const current = readText(file)
+    const hasBlock = current !== null && current.includes(PROJECT_BLOCK_BEGIN) && current.includes(PROJECT_BLOCK_END)
+    if (!p.exists && !hasBlock) return { changed: false, reason: 'no-project-index', path: file }
+    const block = buildProjectBlock(dir)
+    let next
+    if (current === null || current.trim() === '') next = `${block}\n`
+    else if (hasBlock) {
+      const begin = current.indexOf(PROJECT_BLOCK_BEGIN)
+      const end = current.indexOf(PROJECT_BLOCK_END)
+      next = `${current.slice(0, begin)}${block}${current.slice(end + PROJECT_BLOCK_END.length)}`
+    } else next = `${current.replace(/\s+$/, '')}\n\n${block}\n`
+    if (!p.entries.length) {
+      next = next.split(block).join('')
+      if (next.trim() === '') {
+        if (current !== null) {
+          try { fs.unlinkSync(file) } catch (_) { /* 删不掉就算了 */ }
+          return { changed: true, path: file, removed: true, bytes: 0 }
+        }
+        return { changed: false, reason: 'no-project-index', path: file }
+      }
+    }
+    if (next === current) return { changed: false, path: file, bytes: Buffer.byteLength(next, 'utf8') }
+    writeTextAtomic(file, next)
+    return { changed: true, path: file, bytes: Buffer.byteLength(next, 'utf8') }
+  }
+
   return {
     home,
     agentsPath,
     maxBlockBytes,
+    injectProjectBlock,
+    projectBlockFile,
+    maxProjectBlockBytes,
     scopePaths,
     listIndex,
     listProjects,
@@ -910,7 +1008,9 @@ function createStore(options) {
     forget,
     search,
     buildBlock,
+    buildProjectBlock,
     syncAgents,
+    syncWorkspaceAgents,
     commitLibrary,
     allEntryFiles
   }
@@ -928,6 +1028,8 @@ module.exports = {
   INDEX_FILE,
   PROJECT_INDEX_FILE,
   PROJECTS_DIR,
+  PROJECT_BLOCK_BEGIN,
+  PROJECT_BLOCK_END,
   PROJECT_KEY_RE,
   ENTRY_TYPES,
   SCOPES,

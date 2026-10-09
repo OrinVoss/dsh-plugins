@@ -27,7 +27,10 @@ function check(label, fn) {
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-selfcheck-'))
 const home = path.join(root, 'memory')
 const agents = path.join(root, 'AGENTS.md')
-const cwd = 'D:\\桌面\\编程作品\\马具对比\\DeepSeek Harness'
+// 假 cwd 用临时目录：注入工作区记忆区块的代码会写 <cwd>/AGENTS.local.md，
+// 用真实工作区路径会把测试夹具泄漏到开发者的仓库里（2026-10-09 真漏过一次）。
+const cwd = path.join(root, 'workspace')
+fs.mkdirSync(cwd, { recursive: true })
 
 console.log(`\n临时目录：${root}\n`)
 const store = storeLib.createStore({ home, agentsPath: agents, maxBlockBytes: 20000 })
@@ -676,6 +679,101 @@ check('parseEntry 兼容 CRLF：frontmatter 最后一行元数据不丢', () => 
   assert.equal(meta.scope, 'global', 'CRLF 下最后几行 scope 仍应解析')
   assert.equal(meta.updatedAt, '2026-10-01T00:00:00.000Z', 'CRLF 下 updatedAt 不应丢')
   assert.equal(body, '正文')
+})
+
+// ---------------------------------------------------------------- 工作区记忆注入
+
+check('buildProjectBlock 渲染托管区块与条目', () => {
+  const block = store.buildProjectBlock(cwd)
+  assert.match(block, /<!-- dsh-memory-project:begin -->/)
+  assert.match(block, /<!-- dsh-memory-project:end -->/)
+  assert.match(block, /### 工作区记忆索引/)
+  assert.match(block, /decisions\/api-gateway\.md/)
+  assert.match(block, /网关选型/)
+})
+
+check('buildProjectBlock 空索引给出可读占位', () => {
+  const c = path.join(root, 'ws-empty')
+  fs.mkdirSync(c, { recursive: true })
+  const block = store.buildProjectBlock(c)
+  assert.match(block, /还没有记忆条目/)
+})
+
+check('buildProjectBlock 超预算时截断并提示', () => {
+  const tinyHome = path.join(root, 'tiny-memory')
+  const tinyCwd = path.join(root, 'ws-tiny')
+  fs.mkdirSync(tinyCwd, { recursive: true })
+  const tiny = storeLib.createStore({ home: tinyHome, agentsPath: path.join(root, 'tiny-AGENTS.md'), maxProjectBlockBytes: 700 })
+  for (let i = 0; i < 8; i++) {
+    tiny.write('project', { name: `x/e${i}`, title: `条目${i}`, description: '描述'.repeat(20), body: 'b' }, tinyCwd)
+  }
+  const block = tiny.buildProjectBlock(tinyCwd)
+  assert.match(block, /索引超预算，此处省略/)
+})
+
+check('syncWorkspaceAgents 无项目条目时不建文件', () => {
+  const c = path.join(root, 'ws-none')
+  fs.mkdirSync(c, { recursive: true })
+  const res = store.syncWorkspaceAgents(c)
+  assert.equal(res.changed, false)
+  assert.equal(res.reason, 'no-project-index')
+  assert.ok(!fs.existsSync(path.join(c, 'AGENTS.local.md')))
+})
+
+check('syncWorkspaceAgents 有项目条目时写入工作区文件', () => {
+  const res = store.syncWorkspaceAgents(cwd)
+  assert.equal(res.changed, true)
+  const file = path.join(cwd, 'AGENTS.local.md')
+  assert.equal(res.path, file)
+  const text = fs.readFileSync(file, 'utf8')
+  assert.match(text, /decisions\/api-gateway\.md/)
+})
+
+check('syncWorkspaceAgents 幂等：内容不变时不动文件', () => {
+  const res = store.syncWorkspaceAgents(cwd)
+  assert.equal(res.changed, false)
+})
+
+check('syncWorkspaceAgents 不碰托管区块外的用户内容', () => {
+  const c = path.join(root, 'ws-user')
+  fs.mkdirSync(c, { recursive: true })
+  const file = path.join(c, 'AGENTS.local.md')
+  fs.writeFileSync(file, '# 我自己的说明\n\n别动这一段。\n', 'utf8')
+  store.write('project', { name: 'notes/a', title: 'A', description: 'd', body: 'b' }, c)
+  const res = store.syncWorkspaceAgents(c)
+  assert.equal(res.changed, true)
+  const text = fs.readFileSync(file, 'utf8')
+  assert.match(text, /# 我自己的说明/)
+  assert.match(text, /别动这一段。/)
+  assert.match(text, /notes\/a\.md/)
+})
+
+check('syncWorkspaceAgents 条目清空后摘区块并删空文件', () => {
+  const c = path.join(root, 'ws-clear')
+  fs.mkdirSync(c, { recursive: true })
+  store.write('project', { name: 'gone/x', title: 'X', description: 'd', body: 'b' }, c)
+  assert.equal(store.syncWorkspaceAgents(c).changed, true)
+  const file = path.join(c, 'AGENTS.local.md')
+  assert.ok(fs.existsSync(file))
+  store.forget('project', 'gone/x', c)
+  const res = store.syncWorkspaceAgents(c)
+  assert.equal(res.removed, true)
+  assert.ok(!fs.existsSync(file))
+})
+
+check('syncWorkspaceAgents 拒绝记忆根内部与相对路径', () => {
+  assert.equal(store.syncWorkspaceAgents(home).reason, 'inside-memory-home')
+  assert.equal(store.syncWorkspaceAgents('relative/path').reason, 'no-cwd')
+  assert.equal(store.syncWorkspaceAgents(null).reason, 'no-cwd')
+})
+
+check('injectProjectBlock:false 时完全不写工作区', () => {
+  const c = path.join(root, 'ws-off')
+  fs.mkdirSync(c, { recursive: true })
+  const off = storeLib.createStore({ home, agentsPath: agents, injectProjectBlock: false })
+  off.write('project', { name: 'off/y', title: 'Y', description: 'd', body: 'b' }, c)
+  assert.equal(off.syncWorkspaceAgents(c).reason, 'disabled')
+  assert.ok(!fs.existsSync(path.join(c, 'AGENTS.local.md')))
 })
 
 // ---------------------------------------------------------------- 结果

@@ -130,7 +130,10 @@ function applyInner(ctx, config) {
     dshHome: cfg.dshHome,
     agentsPath: cfg.agentsPath,
     maxBlockBytes: cfg.maxBlockBytes,
-    autoCommit: cfg.autoCommit
+    autoCommit: cfg.autoCommit,
+    injectProjectBlock: cfg.injectProjectBlock,
+    projectBlockFile: cfg.projectBlockFile,
+    maxProjectBlockBytes: cfg.maxProjectBlockBytes
   })
   const autoSync = cfg.autoAgentsSync !== false
 
@@ -138,6 +141,12 @@ function applyInner(ctx, config) {
     if (!autoSync) return
     try {
       store.syncAgents(cwd)
+      // 有 cwd 时顺带把「工作区记忆」区块写进工作区自己的指令文件（默认 AGENTS.local.md）。
+      // 全局区块进 ~/.dsh/AGENTS.md，两者互不影响；没有项目条目时这个调用是空操作。
+      if (cwd) {
+        const ws = store.syncWorkspaceAgents(cwd)
+        if (ws && ws.changed) ctx.logger.info('dsh-memory: 已同步工作区记忆区块 → %s', ws.path)
+      }
     } catch (err) {
       ctx.logger.warn('dsh-memory: 同步 AGENTS.md 失败: %o', err)
     }
@@ -547,9 +556,11 @@ function applyHttp(ctx, store, cfg) {
     return { scope: res.scope, target: res.target, removed: res.removed, deindexed: res.deindexed, pruned: res.pruned || [] }
   }))
 
-  route('/memory-api/sync', guard(async () => {
+  route('/memory-api/sync', guard(async (req) => {
     const res = store.syncAgents(null)
-    return { agentsPath: res.path, changed: res.changed, bytes: res.bytes }
+    const cwd = new URL(req.url, 'http://localhost').searchParams.get('cwd')
+    const ws = cwd ? store.syncWorkspaceAgents(cwd) : null
+    return { agentsPath: res.path, changed: res.changed, bytes: res.bytes, workspace: ws }
   }))
 
   ctx.logger.info('dsh-memory: 设置页接口已注册（/memory-api/*）')
@@ -569,3 +580,4 @@ module.exports = {
   },
   applyInner
 }
+// remount #39 (roll forward to fbb33f1)

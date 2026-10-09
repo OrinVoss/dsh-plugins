@@ -15,7 +15,10 @@ const storeLib = require('./lib/store')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-plugin-'))
 const home = path.join(root, 'memory')
 const agentsPath = path.join(root, 'AGENTS.md')
-const cwd = 'D:\\桌面\\编程作品\\马具对比\\DeepSeek Harness'
+// 假 session 的 cwd 必须是**临时目录**：注入工作区记忆区块的代码会写 <cwd>/AGENTS.local.md，
+// 用真实工作区路径会把测试夹具泄漏到开发者自己的仓库里（2026-10-09 真漏过一次）。
+const cwd = path.join(root, 'workspace')
+fs.mkdirSync(cwd, { recursive: true })
 const projectKeyOfCwd = storeLib.projectKey(cwd)
 
 const registered = []
@@ -334,6 +337,12 @@ check('project 作用域用会话 cwd 定位', () => {
   const projects = fs.readdirSync(path.join(home, 'projects'))
   assert.equal(projects.length, 1)
   assert.ok(fs.existsSync(path.join(home, 'projects', projects[0], 'MEMORY.md')))
+  // 新行为：项目条目要按工作区注入 → 写进 <cwd>/AGENTS.local.md 的托管区块
+  const wsFile = path.join(cwd, 'AGENTS.local.md')
+  assert.ok(fs.existsSync(wsFile), '项目写入后应生成工作区指令文件')
+  const wsText = fs.readFileSync(wsFile, 'utf8')
+  assert.match(wsText, /<!-- dsh-memory-project:begin -->/)
+  assert.match(wsText, /decisions\/use-httpx\.md/)
 })
 
 check('search 的 auto 同时覆盖项目与全局', () => {
