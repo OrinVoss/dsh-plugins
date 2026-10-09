@@ -51,3 +51,4 @@
         autoAgentsSync: true
         settingsPage: true
         syncOnStartup: true
+# probe reload trigger

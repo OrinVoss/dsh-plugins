@@ -612,29 +612,22 @@ function applyHttp(ctx, store, cfg) {
   if (retrieveEnabled) {
     try {
       const retrieve = freshRequire('./lib/retrieve')
-      // applyInner 收到的 ctx 不总是带 .on（实测 "ctx.on is not a function"，会导致钩子静默失效）。
-      // 回退链：ctx.on → ctx.root.on → ctx.app.on；哪个成功记哪个。
-      const pickEmitter = () => {
-        const get = (fn) => { try { return fn() } catch (_) { return undefined } }
-        const cands = [
-          ['ctx', get(() => ctx)],
-          ['ctx.root', get(() => ctx.root)],
-          ['ctx.app', get(() => ctx.app)],
-          ['ctx.scope', get(() => ctx.scope)]
-        ]
-        for (const [label, t] of cands) {
-          try { if (t && typeof t.on === 'function') return { label, t } } catch (_) { /* 取属性也可能抛 */ }
-        }
-        return null
-      }
-      const emitter = pickEmitter()
-      if (!emitter) {
+      // **只用 ctx 注册**（作用域绑定 → 插件关闭/卸载时 cordis 自动摘除监听器）。
+      //
+      // 这里曾经有一套"发射器回退链"（ctx.on → ctx.root.on → ctx.app.on → ctx.scope.on），
+      // 起因是报 "ctx.on is not a function"。2026-10-09 用 apply 指纹探针测清楚后删掉了：
+      //   · 正常重挂载 = **1 次 apply，ctx 完整**（有 .on / systemPrompt / agents / sessions / tools / root）
+      //   · 报错的那几次来自**其他作用域的 apply**（受限 ctx，只有 logger/effect/inject/webServer/tools），
+      //     那些作用域本来就注册不了东西，也不该注册
+      //   · 回退链反而带来真隐患：一旦落到 `ctx.root`，监听器就绑在**根作用域**上、**不随插件销毁**
+      // 所以现在：能注册就注册，不能就跳过（受限作用域属预期，降级为 info 日志）。
+      if (typeof ctx.on !== 'function') {
         let shape = ''
         try { shape = Object.keys(ctx || {}).slice(0, 25).join(',') } catch (_) { shape = '(取键失败)' }
-        logInject({ ev: 'register-failed', err: 'no-emitter', ctxKeys: shape, hasRoot: !!(ctx && ctx.root) })
-        throw new Error('dsh-memory: 找不到可用的事件发射器（ctx/ctx.root/ctx.app 都没有 .on）')
+        logInject({ ev: 'l1-skipped', reason: 'no-event-api', ctxKeys: shape })
+        throw new Error('本作用域没有事件 API（受限作用域，跳过 L1）')
       }
-      logInject({ ev: 'emitter', on: emitter.label })
+      const emitter = { label: 'ctx', t: ctx }
       emitter.t.on('agent/pre-step', async (payload, next) => {
         const decision = await next()
         try {
@@ -747,8 +740,9 @@ function applyHttp(ctx, store, cfg) {
       ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d，压缩后清账=%s）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes, String(clearOnCompaction))
       logInject({ ev: 'hook-registered', via: emitter.label, retrieveV: retrieve.VERSION, k: RETRIEVE.k, minScore: RETRIEVE.minScore, repeatAfterSteps: RETRIEVE.repeatAfterSteps, clearOnCompaction })
     } catch (err) {
-      logInject({ ev: 'register-failed', err: String((err && err.message) || err) })
-      ctx.logger.warn('dsh-memory: agent/pre-step 不可用，L1 已降级关闭: %o', err)
+      logInject({ ev: 'l1-skipped', err: String((err && err.message) || err) })
+      // 受限作用域属预期路径 → info 级（以前这里是 warn，于是每次全量重载刷一堆假警报）
+      try { ctx.logger.info('dsh-memory: 本作用域跳过 L1 检索注入: %s', (err && err.message) || err) } catch (_) { /* 降级 */ }
     }
   }
 
@@ -804,3 +798,5 @@ module.exports = {
 // remount #23 (shadow reinject)
 // remount #24 (short query guard)
 // remount #25 (compaction guard)
+// remount #26 (apply fingerprint probe)
+// remount #27 (drop emitter fallback)
