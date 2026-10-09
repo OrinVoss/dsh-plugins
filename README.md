@@ -21,7 +21,7 @@
 
 | 插件 | 包名 / 版本 | 形态 | 一句话 |
 | --- | --- | --- | --- |
-| [**记忆**](memory/) | `dsh-memory` 0.3.1 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具，全局索引自动注入 `AGENTS.md`，设置页可浏览编辑 |
+| [**记忆**](memory/) | `dsh-memory` 0.3.1 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；**L0 速查/专题地图 + L1 按需检索**注入（2026-10-09 改版，测试中），设置页可浏览编辑 |
 | [**桌面宠物**](pet/) | `dsh-pet` 0.1.0 | 组合包 | 浮层里的一只小家伙：5 种宠物、7 种状态，随皮肤换色、随 Agent 干活换表情 |
 | [**皮肤**](skins/) | `dsh-skins` 1.0.0 | 普通包 | 叠加在浅/深主题上的 7 套配色层（青花瓷 / 东京夜 / 水墨 / 青绿山水 / 卡布奇诺 / 中国风 / 莫兰迪），字体一起换 |
 | [**系统状态**](sysmon/) | `dsh-sysmon` 1.0.0 | 普通包 | 侧栏底部一排圆环：CPU / 内存 / 磁盘 IO / 双显卡（窄侧栏收敛成单个 CPU 环） |
@@ -123,11 +123,26 @@ cd <包目录>; npm test          # 有 test 脚本的包
 ### 记忆 `dsh-memory`
 
 跨会话的 Markdown 长期记忆库：`~/.dsh/memory` 下是 `INDEX.md` + 分主题目录，模型拿到
-`memory_write` / `memory_search` / `memory_read` / `memory_forget` 四个工具；全局索引
-由插件维护进 `~/.dsh/AGENTS.md` 的托管区块自动注入。设置 → 记忆 里可浏览 / 编辑 / 删除，
-带健康度卡片；落盘即 `git commit`（只本地、从不 push）。
+`memory_write` / `memory_search` / `memory_read` / `memory_forget` 四个工具。设置 → 记忆 里可浏览 /
+编辑 / 删除，带健康度卡片；落盘即 `git commit`（只本地、从不 push）。
 
-细节与坑（`overwrite` 漏传 `section` 造成索引重复登记等）见 [memory/README.md](memory/README.md)。
+**注入走三条插件自有通道**（2026-10-09 改版，**测试中**）：
+
+| 通道 | 挂在哪 | 干什么 |
+| --- | --- | --- |
+| **L0 全局索引** | `ctx.systemPrompt.section()` | 规则速查 + 专题地图，约 **3.7 KB**（改版前是 91 条逐条摘要 24.8 KB）；进系统提示词，也不会被压缩遮蔽 |
+| **工作区索引** | `ctx.systemPrompt.context()` | 按会话 cwd 现算的 runtime context，预算独立，**不往用户的仓库里写文件** |
+| **L1 按需检索** | `ctx.on('agent/pre-step')` | 每个**用户轮次**用本轮消息检索一遍，只把命中的几条追加进来；只追加 / 内容确定 / 同条目不重复，压缩后清账重投 |
+
+外加 **`compactionGuard` 压缩保护**：压缩把旧消息 shadow 掉时，把确实被遮掉的记忆检索条目补送回来。
+
+这么改的关键收益是**插件一关、注入跟着消失**——以前写进 `AGENTS.md` 的托管区块做不到这一点
+（插件没了、区块还在注入，里面写的 `memory_search` 已不存在）。**文件区块通道已退休**
+（`promptInjection.enabled: false` 可整体回滚），`retrieve.enabled: false` / `blockMode: full`
+可分别关掉 L1 / L0。
+
+细节与坑（`source` 缺了会整轮崩、去重的主触发器是压缩而不是步数、`overwrite` 漏传 `section`
+造成索引重复登记等）见 [memory/README.md](memory/README.md)。
 
 **实机截图**（DSH 桌面端，下同）：设置 → 记忆 的管理页，以及插件页里的记忆卡片。
 
