@@ -1,11 +1,12 @@
 # dsh-sysmon
 
-DSH 的**系统状态**插件：侧栏底部常驻一个 CPU 占用圆环，点开是一块本机状态面板
-（CPU / 内存 / 磁盘 IO / 双显卡占用），数据由宿主半边直接读系统计数器。
+DSH 的**系统状态**插件：侧栏底部常驻一排占用圆环——**CPU / 内存 / 磁盘 / 核显 / 独显**，
+悬停能看到各自明细（磁盘那个还带读写 MB/s）。侧栏收窄时自动收敛成一个 CPU 圆环。
+数据由宿主半边直接读系统计数器。
 
 ```
-侧栏底部 sidebar.footer.action 圆环 ──► 面板（CPU / 内存 / 磁盘 / GPU 格子）
-                                            │ fetch /sysmon-api/sample
+侧栏底部 sidebar.footer.action ──► 圆环排（CPU / 内存 / 磁盘 / 核显 / 独显）
+                                            │ fetch /sysmon-api/sample（每秒）
                                             ▼
                      host.js：Node 内置 os / 系统计数器采样 ──► JSON
 ```
@@ -14,10 +15,11 @@ DSH 的**系统状态**插件：侧栏底部常驻一个 CPU 占用圆环，点�
 
 - **宿主半边**（`host.js`）注册两个只读路由：
   - `GET /sysmon-api/sample` —— 一次采样：CPU 使用率、内存、磁盘 IO、各 GPU 占用。
-  - `GET /sysmon-api/width` —— 侧栏可用宽度，供客户端决定圆环与面板的排布。
-- **客户端半边**（`client.js`）往 `sidebar.footer.action` 插一个圆环，按采样值画占用；
-  悬停显示 `系统监控 · CPU xx%`，点开是本机状态面板。
-- 只用 Node 内置模块与 `ctx.webServer`，不 import 任何 `@deepseek-ai/*`；面板配色全部走
+  - `GET /sysmon-api/width` —— 侧栏可用宽度，供客户端决定圆环排布（宽＝五个环，窄＝一个 CPU 环）。
+- **客户端半边**（`client.js`）往 `sidebar.footer.action` 插这排圆环，按采样值画占用，
+  每个环带 `title` 悬停明细（如 `系统监控 · CPU 12%`、`磁盘 C: D: F: 0% ↓ 0 MB/s ↑ 0.3 MB/s`）。
+  **它是纯展示，没有点击展开的面板。**
+- 只用 Node 内置模块与 `ctx.webServer`，不 import 任何 `@deepseek-ai/*`；配色全部走
   `--dsw-*` token，因此**跟随皮肤与浅深主题**。
 
 ## 安装
