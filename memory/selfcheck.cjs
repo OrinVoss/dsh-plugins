@@ -907,6 +907,12 @@ check('seenWithin：窗口内的算已见过，窗口外的过期', () => {
   assert.deepEqual([...r.seenWithin(new Map(), 5, 60)], [])
 })
 
+check('line() 对补送行原样复用（压缩后补送的确定性）', () => {
+  const r = require('./lib/retrieve')
+  const restored = { restored: true, title: '- 某条（`a/b.md`）—— 摘要' }
+  assert.equal(r.line(restored), '- 某条（`a/b.md`）—— 摘要')
+  assert.match(r.renderInjection([restored]), /a\/b\.md/)
+})
 check('renderInjection 确定性、且给出 name 供 memory_read', () => {
   const r = require('./lib/retrieve')
   const picked = [{ target: 'tools/x.md', title: 'X', summary: '摘要' }]

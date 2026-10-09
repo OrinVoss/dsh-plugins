@@ -597,6 +597,10 @@ function applyHttp(ctx, store, cfg) {
   // 本会话 15 个压缩事件、prune 落在 seq 23/29/36/48）。
   const clearOnCompaction = retrieveCfg.clearOnCompaction !== false
   const injectedBySession = new Map()   // sessionId → Map<target, 注入时的 step>
+  // 精确版用：sessionId → [{seq, lines}]（自己注入过的消息及其日志 seq/原文），以及被压缩遮掉待补送的行
+  const injectedSeqs = new Map()
+  const lostLines = new Map()
+  const pendingLines = []   // 刚注入、还没等到 session/event 回填 seq 的行
   const INJECT_LOG = require('node:path').join(require('node:os').tmpdir(), 'dsh-memory-l1.log')
   const logInject = (o) => {
     if (retrieveCfg.log === false) return
@@ -650,6 +654,21 @@ function applyHttp(ctx, store, cfg) {
           if (cwd) { try { groups.push(store.search('project', query, cwd, RETRIEVE.k)) } catch (_) { /* 无项目库 */ } }
           try { groups.push(store.search('global', query, null, RETRIEVE.k)) } catch (_) { /* 库不可用 */ }
           const picked = retrieve.pickHits(groups, { seen, k: RETRIEVE.k, minScore: RETRIEVE.minScore, maxBytes: RETRIEVE.maxBytes })
+          // 精确版补送：上一轮被压缩遮掉的注入原文，原样再送一次（最多 k 条，且不与本轮挑选重复）
+          const pending = lostLines.get(sessionId) || []
+          if (pending.length) {
+            const have = new Set(picked.picked.map((p) => p.target))
+            for (const line of pending) {
+              if (picked.picked.length >= RETRIEVE.k) break
+              const m = /`([^`]+)`/.exec(line)
+              const target = m ? m[1] : null
+              if (target && have.has(target)) continue
+              picked.picked.push({ target: target || line.slice(0, 40), title: line, summary: '', restored: true })
+              picked.bytes += Buffer.byteLength(line, 'utf8') + 1
+            }
+            lostLines.delete(sessionId)
+            logInject({ ev: 'restore-after-compaction', sessionId, restored: picked.picked.filter((p) => p.restored).length })
+          }
           if (!picked.picked.length) {
             logInject({ ev: 'no-hit', sessionId, query: query.slice(0, 120) })
             return decision
@@ -658,6 +677,7 @@ function applyHttp(ctx, store, cfg) {
           if (injectedBySession.size > 50) injectedBySession.delete(injectedBySession.keys().next().value)
           injectedBySession.set(sessionId, injectedMap)
           const text = retrieve.renderInjection(picked.picked)
+          const lines = picked.picked.map((p) => retrieve.line(p))
           // 消息形状：**必须带 source**。只给 {content:[...]} 会让框架在 message.source.kind 上
           // 抛 "Cannot read properties of undefined (reading 'kind')"，整轮崩掉（2026-10-09 实测，
           // 用户的提问因此没被收到）。这里按官方指令加载器的形状构造，并优先用**真实用户消息的
@@ -669,6 +689,8 @@ function applyHttp(ctx, store, cfg) {
           const lastClaimed = decision.messages.findLastIndex((m) => list.includes(m))
           const at = lastClaimed < 0 ? 0 : lastClaimed + 1
           logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), query: query.slice(0, 120), sourceKind: source.kind, sourceKeys: Object.keys(source) })
+          // 等 session/event 把这条消息的日志 seq 报回来（见下面的监听）
+          pendingLines.push({ sessionId, lines })
           return Object.assign({}, decision, { messages: decision.messages.toSpliced(at, 0, injected) })
         } catch (err) {
           logInject({ ev: 'error', err: String((err && err.message) || err), stack: String((err && err.stack) || '').slice(0, 400) })
@@ -680,10 +702,35 @@ function applyHttp(ctx, store, cfg) {
       if (clearOnCompaction) {
         emitter.t.on('session/event', (session, event) => {
           try {
-            if (!event || typeof event.type !== 'string' || !event.type.startsWith('compaction/')) return
-            if (event.type !== 'compaction/end' && event.type !== 'compaction/prune') return
+            if (!event || typeof event.type !== 'string') return
             const sid = (session && (session.id || (session.header && session.header.id))) || null
             if (!sid) return
+            // ① 自己的注入消息回来了 → 记下它的日志 seq 与原文（靠 source.kind 认出来，不用打标记）
+            if (event.type === 'user/message' && event.data && event.data.source && event.data.source.kind === 'dsh-memory-retrieval') {
+              const idx = pendingLines.findIndex((x) => x.sessionId === sid)
+              if (idx >= 0) {
+                const p = pendingLines.splice(idx, 1)[0]
+                const arr = injectedSeqs.get(sid) || []
+                arr.push({ seq: event.seq, lines: p.lines })
+                injectedSeqs.set(sid, arr)
+                logInject({ ev: 'injection-seq-recorded', sessionId: sid, seq: event.seq, n: p.lines.length })
+              }
+              return
+            }
+            if (!event.type.startsWith('compaction/')) return
+            if (event.type !== 'compaction/end' && event.type !== 'compaction/prune') return
+            // ② 压缩 prune：看有没有自己的注入消息被 shadow 掉 → 记进"待补送"（原文复用，确定性）
+            if (event.type === 'compaction/prune' && event.data && Array.isArray(event.data.shadowedSeqs)) {
+              const shadowed = new Set(event.data.shadowedSeqs)
+              const rec = injectedSeqs.get(sid) || []
+              const lost = []
+              for (const r of rec) if (shadowed.has(r.seq)) lost.push(...r.lines)
+              if (lost.length) {
+                const merged = [...new Set([...(lostLines.get(sid) || []), ...lost])]
+                lostLines.set(sid, merged)
+                logInject({ ev: 'injection-shadowed', sessionId: sid, n: lost.length, totalPending: merged.length })
+              }
+            }
             const had = injectedBySession.get(sid)
             if (had && had.size) {
               injectedBySession.delete(sid)
@@ -732,3 +779,4 @@ module.exports = {
 // remount #20 (freshRequire)
 // remount #21 (freshRequire fixed)
 // remount #22 (all lib via freshRequire)
+// remount #23 (shadow reinject)

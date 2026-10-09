@@ -52,6 +52,7 @@ function seenWithin(injected, stepNo, window) {
 
 /** 一条注入行的渲染（确定性：只依赖 hit 自身） */
 function line(hit) {
+  if (hit && hit.restored) return hit.title   // 补送的行本来就是渲染好的原文，原样复用（确定性）
   return `- ${hit.title || hit.target}（\`${hit.target}\`）—— ${hit.summary || ''}`
 }
 
