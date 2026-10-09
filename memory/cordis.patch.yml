@@ -20,6 +20,13 @@
         # L0 注入形态：layered = 规则速查 + 专题地图（默认，2026-10-09 起）；
         # full = 逐条摘要（旧行为，改这一行即可一键回滚）。
         blockMode: layered
+        # 记忆注入走插件自己的扩展点（不再靠 AGENTS.md 托管区块）：全局 L0 进系统提示词段，
+        # 工作区索引进 runtime context。两者都是作用域 effect ⇒ 随插件销毁；
+        # sectionOrder 落在一方内容（10200）与压缩保护段（10300）之间；contextOrder 排在 110/115/120 之后。
+        promptInjection:
+          enabled: true
+          sectionOrder: 10250
+          contextOrder: 200
         # 压缩保护：把「压缩时必须保留 dsh-memory 检索条目」注册进系统提示词。
         # 为什么放系统提示词：压缩时摘要模型会**逐字回放**系统提示词（surface 节点 0），
         # 而系统提示词**永不被遮蔽** —— 指令必然送到摘要模型眼前，且自己不会被压缩掉。

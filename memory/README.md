@@ -242,6 +242,7 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `sectionHints` | 内置 5 组 | 专题地图每行后面的关键词提示（按分组名覆盖）。内置默认是刻意的——**本文件只在应用启动时读**，写在这里的新键要重启才生效，内置默认保证「改完代码即生效」 |
 | `retrieve` | 见下 | L1 检索注入（见 §12.2）。子字段：`enabled`(`true`)、`k`(`3`)、`minScore`(`8`)、`maxBytes`(`2000`)、`minQueryChars`(`4`，查询有效长度不足就不注入)、`repeatAfterSteps`(`60`，兜底去重窗口)、`clearOnCompaction`(`true`)、`log`(`true`)。`enabled: false` 是 L1 的一键回滚开关 |
 | `compactionGuard` | 见下 | 把「压缩时必须保留 dsh-memory 检索条目」注册进**系统提示词**（见 §12.3）。子字段：`enabled`(`true`)、`order`(`10300`)、`text`(可整体覆盖段文本)。`enabled: false` 关掉 |
+| `promptInjection` | 见下 | 记忆索引改走插件自己的扩展点（见 §12.4）。子字段：`enabled`(`true`)、`sectionOrder`(`10250`)、`contextOrder`(`200`)。与 `settingsPage`/`webServer` **无关** |
 
 ## 6. 从 Z code 导入已有记忆
 
@@ -576,6 +577,35 @@ user's long-term memory store. … copy their entry lines (title, `name`, and su
 
 **验证方式**：会话日志里的 `system/message` 事件应包含段文本（实测 seq 4384、整段 9304 字符里带着它）；
 插件日志有 `compaction-guard-registered` / `compaction-guard-failed`。
+
+### 12.4 记忆索引改走插件扩展点（`promptInjection`，2026-10-09 第二步）
+
+**要解决的问题**：AGENTS.md / AGENTS.local.md 是**文件写入** —— 插件关掉后区块仍留在文件里、仍被官方
+加载器注入，而区块里写的 `memory_search`/`memory_read` 那时已经不存在了（**指令与事实不一致**）。
+`ctx.on` 与 `ctx.systemPrompt.section()` 这类注册都绑在插件作用域上、随插件销毁，**写进文件的东西不会**。
+
+**做法**：把记忆索引从文件搬到两个同样"随插件销毁"的扩展点：
+
+| 层 | 通道 | 说明 |
+|---|---|---|
+| 全局 L0（规则速查 + 专题地图） | `ctx.systemPrompt.section({name:'dsh-memory:index', order:10250})` | 进**系统提示词**；顺带**永不被压缩遮蔽** |
+| 工作区项目索引 | `ctx.systemPrompt.context({name:'dsh-memory:project', order:200})` | 进 **runtime context**（与 `time-context` 同一通道，仍是每轮 user 消息） |
+
+两者的 `text` 都传**函数**（`text(context)` 每次组装求值）——工作区那条据此按 `agent.session.header.cwd`
+现算。段文本带 5 秒 TTL 缓存（`alwaysRules()` 要扫全部条目文件，不能每次组装都扫），写库后立即失效。
+
+**三个必须记住的实现事实**（都是实测踩出来的）：
+
+1. **注册必须挂在主 ctx 上**。三条注入通道原本被我追加在 `applyHttp`（设置页接口）函数末尾，而
+   `applyHttp` 只在 `settingsPage !== false` **且**存在 `webServer` 时才被调用 ⇒
+   `settingsPage: false` 会误关这三样、没有 webServer 的 profile 里则永不注册。
+   现已抽成 `applyInjection(ctx, store, cfg)`，由 `applyInner` 直接调用。
+2. **别把声明和赋值放在两个函数里**。`invalidatePromptCache` 曾在 `applyInner` 声明、在 `applyHttp` 赋值，
+   实测报 `invalidatePromptCache is not defined`（两个函数作用域不同）→ 现放模块级。
+3. **别往组装上下文对象上写标记**：它可能是冻结的，写入会抛错并被自己的 catch 吞掉，表现为"探针没触发"。
+
+**配置**：`promptInjection: {enabled, sectionOrder, contextOrder}`；`enabled: false` 只关这条通道
+（文件区块若还在则继续生效）。**下一步**：验证通过后停写文件区块，并一次性摘掉两个已存在的区块。
 
 ## 13. 自动提交（`autoCommit`）
 

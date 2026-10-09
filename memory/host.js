@@ -135,6 +135,11 @@ function freshRequire(rel) {
   delete require.cache[p]
   return require(p)
 }
+// 系统提示词注入的缓存失效钩子：由 applyInjection 赋值、applyInner 的 sync() 调用。
+// 放模块级是必须的 —— 之前声明在 applyInner、赋值在 applyHttp（两个不同函数），
+// 实测报 "invalidatePromptCache is not defined"。
+let invalidatePromptCache = () => {}
+
 function applyInner(ctx, config) {
   const cfg = config || {}
   const store = createStore({
@@ -162,6 +167,7 @@ function applyInner(ctx, config) {
         const ws = store.syncWorkspaceAgents(cwd)
         if (ws && ws.changed) ctx.logger.info('dsh-memory: 已同步工作区记忆区块 → %s', ws.path)
       }
+      invalidatePromptCache()
     } catch (err) {
       ctx.logger.warn('dsh-memory: 同步 AGENTS.md 失败: %o', err)
     }
@@ -375,6 +381,14 @@ function applyInner(ctx, config) {
     })
   }
 
+  // 三条注入通道在主 ctx 上注册（**不依赖 webServer，也不受 settingsPage 开关影响**）：
+  //   ① L1 检索注入  ② 压缩保护段  ③ 记忆索引（系统提示词段 + runtime context）
+  try {
+    applyInjection(ctx, store, cfg)
+  } catch (err) {
+    ctx.logger.warn('dsh-memory: 注入注册失败（记忆工具与文件区块不受影响）: %o', err)
+  }
+
   // 启动时先同步一次，让 AGENTS.md 里的记忆索引立即生效
   if (autoSync && cfg.syncOnStartup !== false) sync(null)
 
@@ -427,157 +441,18 @@ function readJsonBody(req) {
   })
 }
 
-function applyHttp(ctx, store, cfg) {
-  const route = (path, handler) => ctx.effect(
-    () => ctx.webServer.register({ kind: 'exact', path, handler }),
-    `dsh-memory: ${path}`
-  )
-  const guard = (handler) => async (req, res) => {
-    try {
-      const result = await handler(req, res)
-      if (result !== undefined) sendJson(res, 200, { ok: true, ...result })
-    } catch (err) {
-      sendJson(res, 400, { ok: false, error: String((err && err.message) || err) })
-    }
-  }
-  /** 作用域寻址：scope=project 时必须带 key（设置页从 /projects 拿）。 */
-  const target = (query) => {
-    const scope = query.get('scope') === 'project' ? 'project' : 'global'
-    const key = query.get('key') || null
-    if (scope === 'project' && !key) throw new Error('scope=project 需要 key 参数')
-    if (key !== null && !PROJECT_KEY_RE.test(key)) throw new Error('key 参数不是合法的项目键')
-    return { scope, key }
-  }
-
-  /**
-   * status 的工作区寻址：`?key=<项目键>` 或 `?cwd=<绝对路径>`（据此推出项目键）。
-   * 两者都只用来定位 `home/projects/<键>/MEMORY.md`，不会读写记忆根之外的任何位置；
-   * 仍然显式校验，避免把任意路径当探测入口。
-   */
-  const statusTarget = (query) => {
-    const key = query.get('key')
-    const cwd = query.get('cwd')
-    if (key !== null && key !== '') {
-      if (!PROJECT_KEY_RE.test(key)) throw new Error('key 参数不是合法的项目键')
-      return { value: key, kind: 'key' }
-    }
-    if (cwd !== null && cwd !== '') {
-      if (cwd.length > 1024 || cwd.includes('\0') || !path.isAbsolute(cwd)) {
-        throw new Error('cwd 参数必须是长度合理的绝对路径')
-      }
-      return { value: cwd, kind: 'cwd' }
-    }
-    return { value: null, kind: null }
-  }
-
-  route('/memory-api/status', guard(async (req) => {
-    const url = new URL(req.url, 'http://localhost')
-    const t = statusTarget(url.searchParams)
-    const s = store.status(t.value)
-    return {
-      ...s,
-      project: s.project ? { ...s.project, source: t.kind ? `通过 ${t.kind} 定位` : null } : null
-    }
-  }))
-
-  // 体检：设置页顶部的健康度卡片。相似度扫描是 O(N²) 的纯计算，按 INDEX.md 的
-  // mtime + 60 秒双重条件缓存——写入会改 mtime，所以刚写完立刻刷新也能看到新结果。
-  let healthCache = { at: 0, mtime: 0, data: null }
-  route('/memory-api/health', guard(async () => {
-    let mtime = 0
-    try { mtime = fs.statSync(path.join(store.home, storeLib.INDEX_FILE)).mtimeMs } catch (_) { /* 空库 */ }
-    const now = Date.now()
-    if (healthCache.data && healthCache.mtime === mtime && now - healthCache.at < 60 * 1000) {
-      return healthCache.data
-    }
-    const report = healthLib.analyze({
-      home: store.home,
-      agentsPath: store.agentsPath,
-      maxBlockBytes: store.maxBlockBytes
-    })
-    const data = { report, verdict: healthLib.verdict(report) }
-    healthCache = { at: now, mtime, data }
-    return data
-  }))
-
-  route('/memory-api/projects', guard(async () => ({ projects: store.listProjects() })))
-
-  route('/memory-api/list', guard(async (req) => {
-    const url = new URL(req.url, 'http://localhost')
-    const { scope, key } = target(url.searchParams)
-    const idx = store.listIndex(scope, key)
-    return {
-      scope: idx.scope,
-      key: idx.key ?? null,
-      indexFile: idx.indexFile,
-      exists: idx.exists,
-      sections: idx.sections,
-      entries: idx.entries
-    }
-  }))
-
-  route('/memory-api/entry', guard(async (req) => {
-    const url = new URL(req.url, 'http://localhost')
-    const { scope, key } = target(url.searchParams)
-    const name = url.searchParams.get('name')
-    if (!name) throw new Error('缺少 name 参数')
-    const res = store.read(scope, name, key)
-    if (!res.found) return { found: false, name, target: res.target }
-    return {
-      found: true,
-      scope: res.scope,
-      name: res.name,
-      target: res.target,
-      meta: res.meta,
-      body: res.body
-    }
-  }))
-
-  /** 写入类路由的项目键校验：键必须合法（cwd 只由工具侧按会话 cwd 传入，不走 HTTP）。 */
-  const projectKeyOf = (body) => {
-    const key = body.key
-    if (!key) throw new Error('scope=project 需要 key')
-    if (!PROJECT_KEY_RE.test(String(key))) throw new Error('key 参数不是合法的项目键')
-    return String(key)
-  }
-
-  route('/memory-api/save', guard(async (req) => {
-    const body = await readJsonBody(req)
-    const scope = body.scope === 'project' ? 'project' : 'global'
-    const key = scope === 'project' ? projectKeyOf(body) : null
-    const res = store.write(scope, {
-      name: body.name,
-      title: body.title,
-      description: body.description,
-      type: body.type,
-      section: body.section,
-      body: body.body,
-      overwrite: body.overwrite === true,
-      sessionId: body.sessionId || null
-    }, key)
-    if (!res.ok) throw new Error(res.message || `写入被拒绝（${res.reason}）`)
-    store.syncAgents(null)
-    return { scope: res.scope, key: res.key ?? null, target: res.target, updated: res.updated, indexFile: res.indexFile }
-  }))
-
-  route('/memory-api/delete', guard(async (req) => {
-    const body = await readJsonBody(req)
-    const scope = body.scope === 'project' ? 'project' : 'global'
-    const key = scope === 'project' ? projectKeyOf(body) : null
-    if (!body.name) throw new Error('缺少 name')
-    const res = store.forget(scope, body.name, key)
-    if (!res.removed && !res.deindexed) throw new Error(`没有找到条目 ${body.name}`)
-    store.syncAgents(null)
-    return { scope: res.scope, target: res.target, removed: res.removed, deindexed: res.deindexed, pruned: res.pruned || [] }
-  }))
-
-  route('/memory-api/sync', guard(async (req) => {
-    const res = store.syncAgents(null)
-    const cwd = new URL(req.url, 'http://localhost').searchParams.get('cwd')
-    const ws = cwd ? store.syncWorkspaceAgents(cwd) : null
-    return { agentsPath: res.path, changed: res.changed, bytes: res.bytes, workspace: ws }
-  }))
-
+/**
+ * 记忆的三条注入通道（都注册在**主 ctx** 上，与设置页接口无关）：
+ *   ① L1 检索注入：agent/pre-step，按当前用户消息检索记忆库
+ *   ② 压缩保护段：system-prompt section，要求压缩摘要保留检索条目
+ *   ③ 记忆索引注入：system-prompt section（全局 L0）+ context（工作区项目索引）
+ *
+ * 为什么单独抽成一个函数：它们原先被我追加在 applyHttp（设置页接口）末尾，而 applyHttp 只在
+ * `settingsPage !== false` 且存在 webServer 时才被调用 ⇒ settingsPage:false 会误关这三样、
+ * 没有 webServer 的 profile 里则永不注册；另外还造成过"声明在 applyInner、赋值在 applyHttp"
+ * 的作用域错位（实测报 invalidatePromptCache is not defined）。
+ */
+function applyInjection(ctx, store, cfg) {
   // ---- L1：按当前用户消息检索记忆，只注入命中的几条（2026-10-09）
   // 依据：10 天实测 456 个被注入会话里 86.2% 从未用过记忆工具；48 条从未被读的条目里 41 条主题
   // 在会话里出现过（投递失败）。所以把"模型自己想起来搜"换成"相关记忆自动出现"。
@@ -763,6 +638,242 @@ function applyHttp(ctx, store, cfg) {
     }
   }
 
+  // ---- 记忆注入改走插件自己的扩展点（2026-10-09，"根本方案"第一步：双通道并存）
+  //
+  // 为什么不再靠 AGENTS.md 托管区块：那是**文件写入**，插件关掉后区块仍留在文件里、仍被官方
+  // 加载器注入，而区块里写的 memory_search/memory_read 那时已经不存在了（指令与事实不一致）。
+  //
+  // 改用两个都是**作用域 effect**（⇒ 随插件销毁）的扩展点：
+  //   ① ctx.systemPrompt.section()：全局 L0（规则速查 + 专题地图）进**系统提示词** —— 顺带解决
+  //      "注入内容会被压缩遮蔽"的问题（系统提示词永不被遮蔽）。
+  //   ② ctx.systemPrompt.context()：工作区项目索引进 **runtime context**（与 time-context 同一通道，
+  //      仍是每轮的 user 消息），text 传**函数** ⇒ 每次组装按 agent 的 cwd 现算。
+  // 缓存：段文本每次组装都会求值，而 alwaysRules() 要扫全部条目文件 → 5 秒 TTL + 写库后立刻失效。
+  const promptCfg = (cfg.promptInjection && typeof cfg.promptInjection === 'object') ? cfg.promptInjection : {}
+  if (promptCfg.enabled !== false && ctx.systemPrompt && typeof ctx.systemPrompt === 'object') {
+    try {
+      const storeLib = freshRequire('./lib/store')
+      const MARKERS = new Set([storeLib.BLOCK_BEGIN, storeLib.BLOCK_END, storeLib.PROJECT_BLOCK_BEGIN, storeLib.PROJECT_BLOCK_END])
+      const stripMarkers = (t) => String(t || '').split('\n').filter((l) => !MARKERS.has(l.trim())).join('\n').trim()
+      // 组装上下文是 { agent, scope, signal? }，**本身没有 cwd** —— 要从 agent 上取。
+      // 多写几条路径兜底，并记一条（节流）诊断，确认到底取到没有。
+      // 注意：**不要往上下文对象上写标记**（它可能是冻结的，写会抛错并被自己的 catch 吞掉）。
+      let lastCtxProbe = 0
+      const cwdOf = (c) => {
+        try {
+          const a = c && c.agent
+          const cands = [
+            a && a.session && a.session.header && a.session.header.cwd,
+            a && a.session && a.session.cwd,
+            a && a.cwd,
+            a && a.options && a.options.cwd,
+            c && c.cwd
+          ]
+          const hit = cands.find((x) => typeof x === 'string' && x)
+          try {
+            const now = Date.now()
+            if (now - lastCtxProbe > 5000) {
+              lastCtxProbe = now
+              const safeKeys = (o) => { try { return o ? Object.keys(o).slice(0, 16).join(',') : '(none)' } catch (e) { return 'THROW' } }
+              logInject({ ev: 'assembly-context-probe', ctxType: typeof c, keys: safeKeys(c), agentKeys: safeKeys(a), cwd: hit || '(none)' })
+            }
+          } catch (_) { /* 探针不许影响主流程 */ }
+          return hit || null
+        } catch (_) { return null }
+      }
+      const TTL = 5000
+      let blockCache = { text: '', at: 0 }
+      let projCache = new Map()
+      const renderGlobal = (cwd) => {
+        const now = Date.now()
+        if (blockCache.text && now - blockCache.at < TTL) return blockCache.text
+        blockCache = { text: stripMarkers(store.buildBlock(cwd)), at: now }
+        return blockCache.text
+      }
+      const renderProject = (cwd) => {
+        if (!cwd) return ''
+        const now = Date.now()
+        const hit = projCache.get(cwd)
+        if (hit && now - hit.at < TTL) return hit.text
+        let text = ''
+        try { text = stripMarkers(store.buildProjectBlock(cwd)) } catch (_) { text = '' }
+        projCache.set(cwd, { text, at: now })
+        if (projCache.size > 20) projCache.clear()
+        return text
+      }
+      invalidatePromptCache = () => { blockCache = { text: '', at: 0 }; projCache = new Map() }
+      const sectionOrder = Number.isFinite(promptCfg.sectionOrder) ? promptCfg.sectionOrder : 10250
+      const contextOrder = Number.isFinite(promptCfg.contextOrder) ? promptCfg.contextOrder : 200
+      ctx.systemPrompt.section({
+        name: 'dsh-memory:index',
+        order: sectionOrder,
+        interpolate: false,
+        text: (c) => renderGlobal(cwdOf(c))
+      })
+      ctx.systemPrompt.context({
+        name: 'dsh-memory:project',
+        order: contextOrder,
+        text: (c) => renderProject(cwdOf(c))
+      })
+      logInject({ ev: 'prompt-injection-registered', sectionOrder, contextOrder, bytes: Buffer.byteLength(renderGlobal(null), 'utf8') })
+    } catch (err) {
+      logInject({ ev: 'prompt-injection-failed', err: String((err && err.message) || err) })
+      try { ctx.logger.warn('dsh-memory: 注册系统提示词注入失败（回落到文件区块）: %o', err) } catch (_) { /* 降级 */ }
+    }
+  }
+}
+
+function applyHttp(ctx, store, cfg) {
+  const route = (path, handler) => ctx.effect(
+    () => ctx.webServer.register({ kind: 'exact', path, handler }),
+    `dsh-memory: ${path}`
+  )
+  const guard = (handler) => async (req, res) => {
+    try {
+      const result = await handler(req, res)
+      if (result !== undefined) sendJson(res, 200, { ok: true, ...result })
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: String((err && err.message) || err) })
+    }
+  }
+  /** 作用域寻址：scope=project 时必须带 key（设置页从 /projects 拿）。 */
+  const target = (query) => {
+    const scope = query.get('scope') === 'project' ? 'project' : 'global'
+    const key = query.get('key') || null
+    if (scope === 'project' && !key) throw new Error('scope=project 需要 key 参数')
+    if (key !== null && !PROJECT_KEY_RE.test(key)) throw new Error('key 参数不是合法的项目键')
+    return { scope, key }
+  }
+
+  /**
+   * status 的工作区寻址：`?key=<项目键>` 或 `?cwd=<绝对路径>`（据此推出项目键）。
+   * 两者都只用来定位 `home/projects/<键>/MEMORY.md`，不会读写记忆根之外的任何位置；
+   * 仍然显式校验，避免把任意路径当探测入口。
+   */
+  const statusTarget = (query) => {
+    const key = query.get('key')
+    const cwd = query.get('cwd')
+    if (key !== null && key !== '') {
+      if (!PROJECT_KEY_RE.test(key)) throw new Error('key 参数不是合法的项目键')
+      return { value: key, kind: 'key' }
+    }
+    if (cwd !== null && cwd !== '') {
+      if (cwd.length > 1024 || cwd.includes('\0') || !path.isAbsolute(cwd)) {
+        throw new Error('cwd 参数必须是长度合理的绝对路径')
+      }
+      return { value: cwd, kind: 'cwd' }
+    }
+    return { value: null, kind: null }
+  }
+
+  route('/memory-api/status', guard(async (req) => {
+    const url = new URL(req.url, 'http://localhost')
+    const t = statusTarget(url.searchParams)
+    const s = store.status(t.value)
+    return {
+      ...s,
+      project: s.project ? { ...s.project, source: t.kind ? `通过 ${t.kind} 定位` : null } : null
+    }
+  }))
+
+  // 体检：设置页顶部的健康度卡片。相似度扫描是 O(N²) 的纯计算，按 INDEX.md 的
+  // mtime + 60 秒双重条件缓存——写入会改 mtime，所以刚写完立刻刷新也能看到新结果。
+  let healthCache = { at: 0, mtime: 0, data: null }
+  route('/memory-api/health', guard(async () => {
+    let mtime = 0
+    try { mtime = fs.statSync(path.join(store.home, storeLib.INDEX_FILE)).mtimeMs } catch (_) { /* 空库 */ }
+    const now = Date.now()
+    if (healthCache.data && healthCache.mtime === mtime && now - healthCache.at < 60 * 1000) {
+      return healthCache.data
+    }
+    const report = healthLib.analyze({
+      home: store.home,
+      agentsPath: store.agentsPath,
+      maxBlockBytes: store.maxBlockBytes
+    })
+    const data = { report, verdict: healthLib.verdict(report) }
+    healthCache = { at: now, mtime, data }
+    return data
+  }))
+
+  route('/memory-api/projects', guard(async () => ({ projects: store.listProjects() })))
+
+  route('/memory-api/list', guard(async (req) => {
+    const url = new URL(req.url, 'http://localhost')
+    const { scope, key } = target(url.searchParams)
+    const idx = store.listIndex(scope, key)
+    return {
+      scope: idx.scope,
+      key: idx.key ?? null,
+      indexFile: idx.indexFile,
+      exists: idx.exists,
+      sections: idx.sections,
+      entries: idx.entries
+    }
+  }))
+
+  route('/memory-api/entry', guard(async (req) => {
+    const url = new URL(req.url, 'http://localhost')
+    const { scope, key } = target(url.searchParams)
+    const name = url.searchParams.get('name')
+    if (!name) throw new Error('缺少 name 参数')
+    const res = store.read(scope, name, key)
+    if (!res.found) return { found: false, name, target: res.target }
+    return {
+      found: true,
+      scope: res.scope,
+      name: res.name,
+      target: res.target,
+      meta: res.meta,
+      body: res.body
+    }
+  }))
+
+  /** 写入类路由的项目键校验：键必须合法（cwd 只由工具侧按会话 cwd 传入，不走 HTTP）。 */
+  const projectKeyOf = (body) => {
+    const key = body.key
+    if (!key) throw new Error('scope=project 需要 key')
+    if (!PROJECT_KEY_RE.test(String(key))) throw new Error('key 参数不是合法的项目键')
+    return String(key)
+  }
+
+  route('/memory-api/save', guard(async (req) => {
+    const body = await readJsonBody(req)
+    const scope = body.scope === 'project' ? 'project' : 'global'
+    const key = scope === 'project' ? projectKeyOf(body) : null
+    const res = store.write(scope, {
+      name: body.name,
+      title: body.title,
+      description: body.description,
+      type: body.type,
+      section: body.section,
+      body: body.body,
+      overwrite: body.overwrite === true,
+      sessionId: body.sessionId || null
+    }, key)
+    if (!res.ok) throw new Error(res.message || `写入被拒绝（${res.reason}）`)
+    store.syncAgents(null)
+    return { scope: res.scope, key: res.key ?? null, target: res.target, updated: res.updated, indexFile: res.indexFile }
+  }))
+
+  route('/memory-api/delete', guard(async (req) => {
+    const body = await readJsonBody(req)
+    const scope = body.scope === 'project' ? 'project' : 'global'
+    const key = scope === 'project' ? projectKeyOf(body) : null
+    if (!body.name) throw new Error('缺少 name')
+    const res = store.forget(scope, body.name, key)
+    if (!res.removed && !res.deindexed) throw new Error(`没有找到条目 ${body.name}`)
+    store.syncAgents(null)
+    return { scope: res.scope, target: res.target, removed: res.removed, deindexed: res.deindexed, pruned: res.pruned || [] }
+  }))
+
+  route('/memory-api/sync', guard(async (req) => {
+    const res = store.syncAgents(null)
+    const cwd = new URL(req.url, 'http://localhost').searchParams.get('cwd')
+    const ws = cwd ? store.syncWorkspaceAgents(cwd) : null
+    return { agentsPath: res.path, changed: res.changed, bytes: res.bytes, workspace: ws }
+  }))
+
   ctx.logger.info('dsh-memory: 设置页接口已注册（/memory-api/*）')
 }
 
@@ -800,3 +911,8 @@ module.exports = {
 // remount #25 (compaction guard)
 // remount #26 (apply fingerprint probe)
 // remount #27 (drop emitter fallback)
+// remount #28 (prompt injection)
+// remount #29 (clean retry)
+// remount #30 (injection extracted)
+// remount #31 (cwd probe)
+// remount #32 (throttled cwd probe)
