@@ -1,4 +1,6 @@
 'use strict'
+// 改动后请递增：host.js 会把版本号打进注入日志，用来确认"跑的是哪一版"（require 缓存坑）。
+const VERSION = 4
 // L1 的纯逻辑：从检索结果里挑要注入的条目、渲染成一段文本。
 // 抽出来是为了可测（selfcheck），host.js 只负责挂钩子与搬运。
 //
@@ -92,4 +94,4 @@ function renderInjection(picked) {
   ].join('\n')
 }
 
-module.exports = { userTurnText, pickHits, renderInjection, line, seenWithin }
+module.exports = { userTurnText, pickHits, renderInjection, line, seenWithin, VERSION }

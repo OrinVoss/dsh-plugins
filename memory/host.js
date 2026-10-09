@@ -50,8 +50,8 @@ try {
     delete require.cache[require.resolve('./lib/store')]
     delete require.cache[require.resolve('./lib/health')]
   } catch (_) { /* 首次加载时缓存里本来就没有 */ }
-  storeLib = require('./lib/store')
-  healthLib = require('./lib/health')
+  storeLib = freshRequire('./lib/store')
+  healthLib = freshRequire('./lib/health')
 } catch (err) {
   reportLoadError(err)
   throw err
@@ -123,6 +123,18 @@ function attempt(toolName, fn) {
   }
 }
 
+/**
+ * 清掉 require 缓存后再加载插件自己的 lib 模块。
+ * 为什么必须这样：DSH 的 HMR 只重挂载入口（host.js），**Node 的 require 缓存不会失效**，
+ * 于是 applyInner 里 require('./lib/x') 一直拿到首次加载的旧版本 —— 实测表现为
+ * 「改了 lib/retrieve.js 加了 seenWithin，运行时却报 retrieve.seenWithin is not a function」。
+ * 代价只是每次重挂载重新求值一遍纯模块，可忽略。
+ */
+function freshRequire(rel) {
+  const p = require.resolve(rel)
+  delete require.cache[p]
+  return require(p)
+}
 function applyInner(ctx, config) {
   const cfg = config || {}
   const store = createStore({
@@ -593,7 +605,7 @@ function applyHttp(ctx, store, cfg) {
 
   if (retrieveEnabled) {
     try {
-      const retrieve = require('./lib/retrieve')
+      const retrieve = freshRequire('./lib/retrieve')
       // applyInner 收到的 ctx 不总是带 .on（实测 "ctx.on is not a function"，会导致钩子静默失效）。
       // 回退链：ctx.on → ctx.root.on → ctx.app.on；哪个成功记哪个。
       const pickEmitter = () => {
@@ -681,7 +693,7 @@ function applyHttp(ctx, store, cfg) {
         })
       }
       ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d，压缩后清账=%s）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes, String(clearOnCompaction))
-      logInject({ ev: 'hook-registered', via: emitter.label, k: RETRIEVE.k, minScore: RETRIEVE.minScore, repeatAfterSteps: RETRIEVE.repeatAfterSteps, clearOnCompaction })
+      logInject({ ev: 'hook-registered', via: emitter.label, retrieveV: retrieve.VERSION, k: RETRIEVE.k, minScore: RETRIEVE.minScore, repeatAfterSteps: RETRIEVE.repeatAfterSteps, clearOnCompaction })
     } catch (err) {
       logInject({ ev: 'register-failed', err: String((err && err.message) || err) })
       ctx.logger.warn('dsh-memory: agent/pre-step 不可用，L1 已降级关闭: %o', err)
@@ -717,3 +729,6 @@ module.exports = {
 // remount #17 (L1 diagnostics)
 // remount #18 (ctx emitter fallback)
 // remount #19 (inject sessions/sessionProjections)
+// remount #20 (freshRequire)
+// remount #21 (freshRequire fixed)
+// remount #22 (all lib via freshRequire)
