@@ -465,11 +465,21 @@ window.__ModuleLoader__.load({
 
       ctx.slots.inject(SLOT, () => register('user', makeUserShadow(resolveOriginal)))
 
+      const probe = []
+      try {
+        for (const entry of ctx.slots.entries.call(ctx.slots, SLOT)) {
+          if (entry !== null && entry !== undefined && entry.options !== undefined && entry.options.key === 'user') {
+            probe.push(`${entry.options.priority ?? 0}/loc:${entry.options.locale === undefined ? '-' : String(entry.options.locale)}/inj:${entry.options.inject === undefined ? '-' : typeof entry.options.inject}`)
+          }
+        }
+      } catch (error) {
+        probe.push('probe-error:' + error.message)
+      }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
-        ` locale=${official === undefined || official.options === undefined ? '?' : typeof official.options.locale}` +
-        ` inject=${official === undefined || official.options === undefined ? '?' : typeof official.options.inject}`,
+        `v=4 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        ` officialLocale=${official === undefined || official.options === undefined ? '?' : String(official.options.locale)}` +
+        ` userEntries=[${probe.join(' | ')}]`,
       ))
     }
 
