@@ -1,0 +1,30 @@
+{
+  "name": "dsh-message-edit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "撤回 / 编辑已发送的用户消息：宿主半边用 surface replace 事件原地改写模型上下文，客户端半边在用户气泡上加按钮并按轮次隐藏被遮蔽的行。",
+  "main": "host.js",
+  "type": "commonjs",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "host.js",
+    "client.js",
+    "cordis.patch.yml",
+    "selftest.cjs",
+    "README.md"
+  ]
+}
