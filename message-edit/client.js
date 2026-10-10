@@ -168,7 +168,12 @@ window.__ModuleLoader__.load({
  * --dsw-radius-lg + --dsw-elevation-panel；按钮抄官方 Button 原子的 .sm 尺寸
  * （28px 高 / 12px 字号 / radius-sm），配色与 hover 取值同样来自官方原子。
  */
-.me-root[data-confirming="1"]{z-index:30}
+/*
+ * 注意：**不要**给 .me-root 抬 z-index。曾经这么干过（想压过输入框），结果整条消息
+ * 行（含蓝色气泡本体）都被抬到输入框上面，看起来像气泡浮在输入框里。
+ * 现在方向由翻转保证（气泡永远不会和输入框重叠），层级只需要气泡自己那层 z-index:1，
+ * 它足以盖住后面那些 DOM 靠后但没有定位层级的行。
+ */
 .me-confirm{position:absolute;right:0;top:calc(100% + 6px);z-index:1;
   box-sizing:border-box;display:flex;flex-direction:column;gap:10px;
   width:max-content;max-width:min(300px,80vw);padding:12px;
@@ -176,7 +181,10 @@ window.__ModuleLoader__.load({
   background:var(--dsw-menu-surface-fill,var(--dsw-alias-bg-layer-2,#fff));
   backdrop-filter:var(--dsw-menu-backdrop-filter,none);
   box-shadow:var(--dsw-elevation-panel,var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.18)));
-  animation:me-confirm-in var(--ds-transition-duration,140ms) var(--ds-ease-in-out,ease-out)}
+  animation:me-confirm-in var(--ds-transition-duration,140ms) var(--ds-ease-in-out,ease-out);
+  max-height:min(40vh,320px);overflow:auto}
+/* 最后一条消息下面就是输入框：放不下时翻到消息上方（由 JS 实测可用空间决定）。 */
+.me-confirm[data-placement="above"]{top:auto;bottom:calc(100% + 6px)}
 .me-confirm-title{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:510;line-height:20px}
 .me-confirm-text{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:pre-wrap}
 .me-confirm-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
@@ -399,6 +407,7 @@ window.__ModuleLoader__.load({
         const [closing, setClosing] = React.useState(false)
         const [editBox, setEditBox] = React.useState(null)
         const [confirming, setConfirming] = React.useState(false)
+        const [placement, setPlacement] = React.useState('below')
         const confirmRef = React.useRef(null)
         const originalText = React.useMemo(() => textOf(data), [data])
         const inputRef = React.useRef(null)
@@ -556,6 +565,47 @@ window.__ModuleLoader__.load({
           }, CLOSE_MS)
         }, [])
 
+        /**
+         * 气泡方向：默认贴在消息下面；但**最后一条消息的下面就是输入框**
+         * （不透明、层级比对话流高），一律朝下会被它盖住半截。
+         *
+         * 关键坑（真机踩到）：对话流的滚动容器**一直延伸到窗口底边**（输入框是浮在
+         * 它上面的），所以"下方空间"不能拿滚动容器底边算，否则永远算成够用。
+         * 真正的边界是**输入框的顶边**；输入框没有稳定的非哈希类名，这里改成
+         * "页面里最靠下的输入控件就是消息输入框"，拿它的 top 当边界。
+         */
+        React.useLayoutEffect(() => {
+          if (!confirming) return
+          const root = rootRef.current
+          const panel = confirmRef.current
+          if (root === null || panel === null) return
+
+          // 对话区顶部：最近的滚动容器（避免气泡顶到窗口标题栏）
+          let scroller = root.parentElement
+          while (scroller !== null) {
+            const style = window.getComputedStyle(scroller)
+            if (/(auto|scroll)/.test(style.overflowY) && scroller.scrollHeight > scroller.clientHeight + 1) break
+            scroller = scroller.parentElement
+          }
+          const viewport = scroller === null ? null : scroller.getBoundingClientRect()
+
+          // 对话区底部：最靠下的输入控件（= 消息输入框）的顶边
+          let limitBottom = viewport === null ? window.innerHeight : viewport.bottom
+          let lowest = -Infinity
+          for (const field of document.querySelectorAll('input, textarea, [contenteditable="true"]')) {
+            const rect = field.getBoundingClientRect()
+            if (rect.width < 80 || rect.height === 0 || rect.bottom <= lowest) continue
+            lowest = rect.bottom
+            limitBottom = rect.top - 10
+          }
+
+          const box = root.getBoundingClientRect()
+          const panelBox = panel.getBoundingClientRect()
+          const below = limitBottom - box.bottom - 6
+          const above = box.top - (viewport === null ? 0 : viewport.top) - 6
+          setPlacement(panelBox.height <= below || below >= above ? 'below' : 'above')
+        }, [confirming])
+
         // 确认气泡的关闭语义：点外面 / Esc 关；开着时 Enter 直接确认（与官方弹层一致）。
         // 用捕获阶段拦 Enter/Esc：语义固定，也不会让官方组件在同一按键上另有动作。
         React.useEffect(() => {
@@ -676,6 +726,7 @@ window.__ModuleLoader__.load({
                 ref: confirmRef,
                 role: 'dialog',
                 'aria-label': COPY.confirmTitle,
+                'data-placement': placement,
               },
                 React.createElement('div', { className: 'me-confirm-title' }, COPY.confirmTitle),
                 React.createElement('p', { className: 'me-confirm-text' }, COPY.confirmBody(turnOf(node) ?? 0)),
@@ -805,7 +856,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=7 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=10 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))
