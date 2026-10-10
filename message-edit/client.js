@@ -47,9 +47,9 @@ window.__ModuleLoader__.load({
     const COPY = {
       edit: CN ? '编辑' : 'Edit',
       retract: CN ? '撤回' : 'Recall',
-      save: CN ? '保存并重发' : 'Save & resend',
-      cancel: CN ? '取消' : 'Cancel',
-      editing: CN ? '编辑这条消息（Ctrl+Enter 保存）' : 'Edit this message (Ctrl+Enter to save)',
+      save: CN ? '保存并重新发送' : 'Save & resend',
+      cancel: CN ? '取消编辑' : 'Cancel editing',
+      editing: CN ? '编辑这条消息' : 'Edit this message',
       confirm: (turn) => (CN
         ? `撤回后，这条消息及其之后的对话（第 ${turn} 轮起）将不再进入模型上下文。\n\n原始会话日志仍会保留，但这一段会从当前对话视图里隐藏。\n\n确定撤回吗？`
         : `This message and everything after it (turn ${turn}+) leaves the model context.\n\nThe raw session log keeps them; this chat view hides that span.\n\nRecall anyway?`),
@@ -60,31 +60,50 @@ window.__ModuleLoader__.load({
     }
 
     // ------------------------------------------------------------------ 样式
+    //
+    // 全部对齐官方 CSS module 的**原始取值**，不另造视觉语言：
+    //  - 气泡/编辑态几何抄 `cJsG2q_userStack` + `cJsG2q_bubble`（宽度上限、radius-xl、10px 16px 内边距、
+    //    content-font-size 与 22px+delta 行高）；
+    //  - 按钮几何抄 `xD_KDq_action`（28px+delta 方钮、radius-sm、label-tertiary、hover 换
+    //    interactive-bg-hover + label-secondary、图标 15px+delta）；
+    //  - 编辑框按键行为与内联编辑器抄 QueueDock 的 `QueueEditor`（Enter 保存 / Shift+Enter 换行 /
+    //    Esc 取消、随内容自增高、纯图标按钮、无自造标题）。
 
     const CSS = `
 [${HIDDEN_ATTR}]{display:none!important}
 .me-root{display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:100%;min-width:0}
-.me-actions{display:flex;align-items:center;gap:2px;justify-content:flex-end;min-height:22px;opacity:.55;transition:opacity .12s ease}
-.me-root:hover .me-actions{opacity:1}
-.me-btn{appearance:none;background:0 0;border:0;padding:1px 6px;border-radius:var(--dsw-radius-sm,6px);
-  color:var(--dsw-alias-label-tertiary,#8a8f98);font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;
-  transition:color .12s ease,background .12s ease}
-.me-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-label-primary,#111)}
-.me-btn[disabled]{opacity:.45;cursor:default}
-.me-editor{box-sizing:border-box;width:min(560px,88%);border-radius:var(--dsw-radius-xl,14px);
-  background:var(--dsw-specific-bubble,rgba(127,127,127,.12));padding:8px 10px 10px;display:flex;flex-direction:column;gap:8px}
-.me-editor-title{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8a8f98);text-align:right}
-.me-editor textarea{box-sizing:border-box;width:100%;min-height:72px;max-height:300px;resize:vertical;
-  border-radius:var(--dsw-radius-md,10px);border:.5px solid var(--dsw-alias-border-l1,rgba(127,127,127,.3));
-  background:var(--dsw-specific-input-major,var(--dsw-alias-bg-base,#fff));color:var(--dsw-alias-label-primary,#111);
-  font-family:inherit;font-size:var(--dsh-content-font-size,14px);line-height:1.55;padding:8px 10px;outline:none}
-.me-editor textarea:focus{border-color:var(--dsw-alias-state-business-primary,#4d6bfe)}
-.me-editor-actions{display:flex;justify-content:flex-end;gap:8px}
-.me-primary{appearance:none;border:0;border-radius:var(--dsw-radius-md,10px);padding:5px 12px;
-  background:var(--dsw-alias-state-business-primary,#4d6bfe);color:#fff;font-family:inherit;font-size:13px;cursor:pointer}
-.me-primary[disabled]{opacity:.5;cursor:default}
-.me-ghost{appearance:none;border:.5px solid var(--dsw-alias-border-l1,rgba(127,127,127,.3));border-radius:var(--dsw-radius-md,10px);
-  padding:5px 12px;background:0 0;color:var(--dsw-alias-label-primary,#111);font-family:inherit;font-size:13px;cursor:pointer}
+.me-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+  height:calc(28px + var(--dsh-content-font-delta,0px));transition:opacity 80ms ease}
+.me-btn{box-sizing:border-box;height:calc(28px + var(--dsh-content-font-delta,0px));padding:0 8px;
+  border-radius:var(--dsw-radius-sm);border:none;background:0 0;color:var(--dsw-alias-label-tertiary);
+  font-family:inherit;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center}
+.me-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+.me-btn:disabled{cursor:default;opacity:.4}
+/* 与官方一致：非最后一条用户消息的操作行默认隐藏，悬停/聚焦才显形 */
+@media (hover:hover){
+  [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]) .me-actions{opacity:0}
+  [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]):hover .me-actions,
+  [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]):focus-within .me-actions{opacity:1}
+}
+.me-editor{box-sizing:border-box;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);
+  background:var(--dsw-specific-bubble);border-radius:var(--dsw-radius-xl);
+  padding:10px 16px;color:var(--dsw-alias-label-primary);
+  font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));
+  display:flex;flex-direction:column;gap:6px}
+.me-editor-input{box-sizing:border-box;width:100%;margin:0;padding:0;
+  min-height:calc(22px + var(--dsh-content-font-delta,0px));max-height:40vh;overflow-y:auto;resize:none;
+  background:0 0;border:0;outline:none;color:inherit;font:inherit;line-height:inherit;
+  white-space:pre-wrap;word-break:break-word}
+.me-editor-input::placeholder{color:var(--dsw-alias-label-tertiary)}
+.me-editor-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+  height:calc(28px + var(--dsh-content-font-delta,0px))}
+.me-icon{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));
+  border-radius:var(--dsw-radius-sm);border:none;background:0 0;color:var(--dsw-alias-label-tertiary);
+  cursor:pointer;padding:6px;display:inline-flex;align-items:center;justify-content:center}
+.me-icon svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px))}
+.me-icon:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+.me-icon:disabled{cursor:default;opacity:.4}
 .me-toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:3000;
   background:var(--dsw-specific-menu,rgba(30,30,30,.92));color:var(--dsw-alias-label-primary,#fff);
   border-radius:var(--dsw-radius-lg,12px);padding:7px 14px;font-size:13px;line-height:20px;
@@ -228,6 +247,30 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 官方 `IconCheckOutlineRegular` 的 art work（viewBox 16、stroke 1、size 15+delta）内联。
+     * 客户端插件不能 require app 内部 ESM 库（ui-primitives），所以路径数据只能内联。
+     */
+    function IconCheck({ className }) {
+      return React.createElement('svg', {
+        className, width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': 'true', strokeWidth: 1,
+      }, React.createElement('path', {
+        d: 'M2.25 8.5L5.49732 11.7473C5.90519 12.1552 6.57263 12.1344 6.95426 11.7018L13.75 4',
+        stroke: 'currentColor',
+      }))
+    }
+
+    /** 官方 `IconCloseOutlineRegular` 的 art work，同样内联。 */
+    function IconClose({ className }) {
+      return React.createElement('svg', {
+        className, width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': 'true', strokeWidth: 1,
+      },
+      React.createElement('path', { d: 'M2.5 2.5L13.5 13.5', stroke: 'currentColor' }),
+      React.createElement('path', { d: 'M13.5 2.5L2.5 13.5', stroke: 'currentColor' }))
+    }
+
+    /**
      * user 渲染器的遮蔽件：官方气泡 + 编辑 / 撤回按钮；编辑时换成内联编辑框。
      */
     function makeUserShadow(resolveOriginal) {
@@ -241,6 +284,15 @@ window.__ModuleLoader__.load({
         const [draft, setDraft] = React.useState('')
         const [busy, setBusy] = React.useState(false)
         const originalText = React.useMemo(() => textOf(data), [data])
+        const inputRef = React.useRef(null)
+
+        // 与官方 QueueEditor 同款：随内容自增高，长到 CSS 上限（40vh）后自己滚。
+        React.useLayoutEffect(() => {
+          const node = inputRef.current
+          if (node === null) return
+          node.style.height = 'auto'
+          node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`
+        }, [draft, editing])
 
         // 订阅被遮蔽轮次的变化。
         React.useEffect(() => {
@@ -320,34 +372,46 @@ window.__ModuleLoader__.load({
         const Original = resolveOriginal('user')
 
         if (editing) {
+          // 几何与官方用户气泡一致（宽度上限 / radius-xl / 10px 16px / 同字号行高），
+          // 所以点编辑时气泡原地变成输入态，不跳、不错位。
+          // 按键行为照抄 QueueDock 的 QueueEditor：Enter 保存、Shift+Enter 换行、Esc 取消。
           return React.createElement('div', { className: 'me-root', ref: rootRef },
             React.createElement('div', { className: 'me-editor' },
-              React.createElement('div', { className: 'me-editor-title' }, COPY.editing),
               React.createElement('textarea', {
+                ref: inputRef,
+                className: 'me-editor-input',
                 value: draft,
                 autoFocus: true,
+                rows: 1,
+                'aria-label': COPY.editing,
+                placeholder: COPY.editing,
                 onChange: (event) => setDraft(event.target.value),
                 onKeyDown: (event) => {
-                  if (event.key === 'Escape') { event.preventDefault(); setEditing(false) }
-                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  if (event.key === 'Escape') {
                     event.preventDefault()
-                    if (draft.trim() === '') toast(COPY.empty, 'error')
-                    else void run('edit', draft)
+                    setEditing(false)
+                    return
                   }
+                  if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+                  event.preventDefault()
+                  if (draft.trim() === '') { toast(COPY.empty, 'error'); return }
+                  void run('edit', draft)
                 },
               }),
               React.createElement('div', { className: 'me-editor-actions' },
                 React.createElement('button', {
-                  type: 'button', className: 'me-ghost',
-                  onClick: () => setEditing(false),
-                }, COPY.cancel),
-                React.createElement('button', {
-                  type: 'button', className: 'me-primary', disabled: busy,
+                  type: 'button', className: 'me-icon', disabled: busy || draft.trim() === '',
+                  'aria-label': COPY.save, title: COPY.save,
                   onClick: () => {
                     if (draft.trim() === '') { toast(COPY.empty, 'error'); return }
                     void run('edit', draft)
                   },
-                }, COPY.save),
+                }, React.createElement(IconCheck, {})),
+                React.createElement('button', {
+                  type: 'button', className: 'me-icon', disabled: busy,
+                  'aria-label': COPY.cancel, title: COPY.cancel,
+                  onClick: () => setEditing(false),
+                }, React.createElement(IconClose, {})),
               ),
             ),
           )
