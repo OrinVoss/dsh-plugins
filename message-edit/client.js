@@ -71,15 +71,15 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 [${HIDDEN_ATTR}]{display:none!important}
-.me-root{display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:100%;min-width:0}
-.me-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+.me-root{position:relative;display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:100%;min-width:0}
+/*
+ * 操作行落在**原生操作行内部**：官方 MessageIconActions 的 extraActions 就排在这两个位置
+ * （复制键之后、同样 gap 8、同样 28px+delta 的方钮）。气泡那侧的调用点没传 extraActions，
+ * 所以这里用"给原生行加 padding-right 挤开、自己的按钮绝对定位补进腾出的空位"复刻它。
+ */
+.me-root [data-clock="start"]{padding-right:calc(72px + 2 * var(--dsh-content-font-delta,0px))}
+.me-actions{position:absolute;right:0;bottom:0;display:flex;align-items:center;justify-content:flex-end;gap:8px;
   height:calc(28px + var(--dsh-content-font-delta,0px));transition:opacity 80ms ease}
-.me-btn{box-sizing:border-box;height:calc(28px + var(--dsh-content-font-delta,0px));padding:0 8px;
-  border-radius:var(--dsw-radius-sm);border:none;background:0 0;color:var(--dsw-alias-label-tertiary);
-  font-family:inherit;font-size:var(--dsh-content-font-size-secondary,13px);line-height:1;cursor:pointer;
-  display:inline-flex;align-items:center}
-.me-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
-.me-btn:disabled{cursor:default;opacity:.4}
 /* 与官方一致：非最后一条用户消息的操作行默认隐藏，悬停/聚焦才显形 */
 @media (hover:hover){
   [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]) .me-actions{opacity:0}
@@ -98,7 +98,8 @@ window.__ModuleLoader__.load({
 .me-editor-input::placeholder{color:var(--dsw-alias-label-tertiary)}
 .me-editor-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
   height:calc(28px + var(--dsh-content-font-delta,0px))}
-.me-icon{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));
+/* 方钮几何抄官方 xD_KDq_action：28px+delta、radius-sm、label-tertiary、hover 换色、图标 15px+delta */
+.me-icon{box-sizing:border-box;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));
   border-radius:var(--dsw-radius-sm);border:none;background:0 0;color:var(--dsw-alias-label-tertiary);
   cursor:pointer;padding:6px;display:inline-flex;align-items:center;justify-content:center}
 .me-icon svg{width:calc(15px + var(--dsh-content-font-delta,0px));height:calc(15px + var(--dsh-content-font-delta,0px))}
@@ -270,6 +271,31 @@ window.__ModuleLoader__.load({
       React.createElement('path', { d: 'M13.5 2.5L2.5 13.5', stroke: 'currentColor' }))
     }
 
+    /** 官方 `IconEditOutlineRegular`（铅笔）的 art work，同样内联。 */
+    function IconEdit({ className }) {
+      return React.createElement('svg', {
+        className, width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': 'true', strokeWidth: 1,
+      },
+      React.createElement('path', {
+        d: 'M8.85596 2.69971H4.19971C3.37141 2.69971 2.69992 3.37146 2.69971 4.19971V11.8003C2.69992 12.6285 3.37141 13.3003 4.19971 13.3003H11.8003C12.6283 13.2999 13.3001 12.6283 13.3003 11.8003V7.89893H14.3003V11.8003C14.3001 13.1806 13.1806 14.2999 11.8003 14.3003H4.19971C2.81913 14.3003 1.69992 13.1808 1.69971 11.8003V4.19971C1.69992 2.81918 2.81913 1.69971 4.19971 1.69971H8.85596V2.69971Z',
+        fill: 'currentColor',
+      }), React.createElement('path', { d: 'M7.7849 8.23878L13.888 2.13574', stroke: 'currentColor' }))
+    }
+
+    /** 官方 `IconTrashOutlineRegular` 的 art work，同样内联。 */
+    function IconTrash({ className }) {
+      return React.createElement('svg', {
+        className, width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': 'true', strokeWidth: 1,
+      },
+      React.createElement('path', { d: 'M1.28149 3.88831H14.7187', stroke: 'currentColor' }),
+      React.createElement('path', { d: 'M5.41602 3.88833V2.47962C5.41602 2.29282 5.52492 2.11366 5.71876 1.98157C5.9126 1.84948 6.17551 1.77527 6.44964 1.77527H9.55053C9.82466 1.77527 10.0876 1.84948 10.2814 1.98157C10.4753 2.11366 10.5842 2.29282 10.5842 2.47962V3.88833', stroke: 'currentColor' }),
+      React.createElement('path', { d: 'M2.57349 3.88831L3.19366 13.2943C3.21937 13.5502 3.33952 13.7872 3.53065 13.9593C3.72178 14.1313 3.97016 14.2259 4.22729 14.2246H11.7728C12.0299 14.2259 12.2783 14.1313 12.4694 13.9593C12.6605 13.7872 12.7807 13.5502 12.8064 13.2943L13.4266 3.88831', stroke: 'currentColor' }),
+      React.createElement('path', { d: 'M6.44946 6.98926V11.1238', stroke: 'currentColor' }),
+      React.createElement('path', { d: 'M9.55054 6.98926V11.1238', stroke: 'currentColor' }))
+    }
+
     /**
      * user 渲染器的遮蔽件：官方气泡 + 编辑 / 撤回按钮；编辑时换成内联编辑框。
      */
@@ -419,15 +445,18 @@ window.__ModuleLoader__.load({
 
         return React.createElement('div', { className: 'me-root', ref: rootRef },
           Original === undefined ? null : React.createElement(Original, props),
+          // 排进原生操作行：给原生行加 padding-right 腾出位置，这两个图标钮补在复制键右侧。
           React.createElement('div', { className: 'me-actions' },
             React.createElement('button', {
-              type: 'button', className: 'me-btn', disabled: busy, title: COPY.edit,
+              type: 'button', className: 'me-icon', disabled: busy,
+              'aria-label': COPY.edit, title: COPY.edit,
               onClick: () => { setDraft(originalText); setEditing(true) },
-            }, COPY.edit),
+            }, React.createElement(IconEdit, {})),
             React.createElement('button', {
-              type: 'button', className: 'me-btn', disabled: busy, title: COPY.retract,
+              type: 'button', className: 'me-icon', disabled: busy,
+              'aria-label': COPY.retract, title: COPY.retract,
               onClick: () => { void run('retract') },
-            }, COPY.retract),
+            }, React.createElement(IconTrash, {})),
           ),
         )
       }
