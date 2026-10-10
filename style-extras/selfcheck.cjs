@@ -2,8 +2,8 @@
 //
 //   node selfcheck.cjs
 //
-// 覆盖：包声明（组合包 patch / 图标 / locale 导出）、patch 的三条 insert 与
-// 配置、locale 元信息、图标文件（存在、是 SVG、≤256 KiB）、以及三个成员包
+// 覆盖：包声明（组合包 patch / 图标 / locale 导出）、patch 的五条 insert 与
+// 配置、locale 元信息、图标文件（存在、是 SVG、≤256 KiB）、以及五个成员包
 // 是否作为同级目录存在并各自带好图标与 locale 元信息。
 const fs = require('fs')
 const path = require('path')
@@ -14,6 +14,8 @@ const MEMBERS = [
   { dir: 'token-stats', pkg: 'dsh-token-stats', rowId: 'token-stats' },
   { dir: 'sysmon', pkg: 'dsh-sysmon', rowId: 'sysmon' },
   { dir: 'skins', pkg: 'dsh-skins', rowId: 'skins' },
+  { dir: 'btw', pkg: 'dsh-btw', rowId: 'btw' },
+  { dir: 'message-edit', pkg: 'dsh-message-edit', rowId: 'message-edit' },
 ]
 const MAX_ICON_BYTES = 256 * 1024
 
@@ -59,7 +61,7 @@ test('入口模块可被 require，且不注册任何东西', () => {
   assert(Object.keys(mod).length === 0, 'index.js 不应导出插件实现')
 })
 
-console.log('\n[2] 组合包 patch 的三条 insert')
+console.log('\n[2] 组合包 patch 的五条 insert')
 
 const patchText = fs.readFileSync(path.join(DIR, 'cordis.patch.yml'), 'utf8')
 
@@ -108,7 +110,7 @@ test('组合包自己有图标与中英元信息', () => {
   checkLocale(DIR, 'style-extras')
 })
 
-console.log('\n[4] 三个成员包（同级目录）')
+console.log('\n[4] 五个成员包（同级目录）')
 
 for (const m of MEMBERS) {
   const dir = path.join(SIBLING_ROOT, m.dir)

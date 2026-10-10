@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "临时提问（/btw）：右侧栏「开始」页的旁支提问卡片——答案不写入会话历史、无工具、退出即消失。",
+  "icon": "./icon.svg",
   "main": "host.js",
   "type": "commonjs",
   "exports": {
     ".": "./host.js",
     "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -15,16 +17,14 @@
       "platform": "web",
       "immediately": true,
       "inject": []
-    },
-    "bundle": {
-      "patch": "./cordis.patch.yml"
     }
   },
   "files": [
     "host.js",
     "client.js",
-    "cordis.patch.yml",
     "selftest.cjs",
+    "icon.svg",
+    "locale/*.json",
     "README.md"
   ]
 }

@@ -50,7 +50,9 @@
 - 包目录：`~/.dsh/plugins/btw`
 - 客户端半边：`client.js` —— 注册 tab 类型（kind `btw`）与开始页 guide 入口
 - 宿主半边：`host.js` —— 四个本地路由，见下
-- 组合包：`cordis.patch.yml` 里 `insert id: btw`；profile 的 `dsh.profile.bundles` 列出 `dsh-btw`
+- 声明：本包是**样式扩展（`dsh-style-extras`）组合包的成员**——加载行由 style-extras 的
+  `cordis.patch.yml` 声明（`insert id: btw`）；profile 的 `dsh.profile.bundles` 里列的是
+  `dsh-style-extras`，**不是本包**（本包不再自带 `dsh.bundle`，也没有自己的 patch 文件）
 
 ### 宿主路由
 
