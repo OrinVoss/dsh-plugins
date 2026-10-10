@@ -142,6 +142,28 @@ return <div className="me-root">
 
 ---
 
+### 6. 撤回确认气泡：贴着消息行内的小弹层，不用 `window.confirm`
+
+早期版本用 `window.confirm()`，弹出来的是**操作系统对话框**，与 DSH 的视觉语言完全无关。
+
+**第一版改成挂在 `document.body` 的全屏 Mask + Dialog，结果真机上按钮点不动**（2026-10-10 反馈：
+"取消不了，撤回也撤回不了，界面没有任何变化"）：DSH 应用自身有一层全窗口 overlay，
+`body` 级的固定层会被它压住——视觉上能看到（所以看着像弹出来了），但**收不到点击**，
+而且全屏遮罩把整个界面挡住了。
+
+现在的做法是**把气泡挂进消息行**（`.me-root` 的子元素，React 渲染，`confirming` 状态控制）：
+
+- **在应用 DOM 树里**：不会被任何 overlay 压住，点击必然生效；不遮挡界面，点外面或按 `Esc` 就关。
+- **视觉**：抄官方弹层/菜单取值 `--dsw-menu-surface-fill` + `--dsw-menu-backdrop-filter` +
+  `--dsw-radius-lg` + `--dsw-elevation-panel`；进入动画只有 `opacity`（官方 `modalEnter` 就是这样）；
+  `prefers-reduced-motion` 下关闭。
+- **按钮**：抄官方 Button 原子的 `.sm` 尺寸（28px 高 / 12px 字号 / `--dsw-radius-sm` / `padding:0 10px`），
+  主按钮 `--dsw-alias-button-primary-fill`+`-hover`，次按钮 ghost 用 `--dsw-alias-interactive-bg-hover`+`-active`。
+- **位置**：`position:absolute; right:0; top:calc(100% + 6px)`——就在这条消息下面、右对齐；
+  开着时给 `.me-root` 加 `data-confirming="1"`（`z-index:30`）压过后续行。
+- **行为**：`Enter` 确认、`Esc` 取消、点气泡外面取消、初始焦点在主按钮上（均在捕获阶段拦按键，
+  避免官方组件在同一按键上另有动作）；确认后才走 `/apply`，`busy` 期间撤回键禁用。
+
 ## 三、HTTP 接口
 
 与 `btw` / `sysmon` 同一套 `ctx.webServer` 约定（本地回环，仅本机可访问）。

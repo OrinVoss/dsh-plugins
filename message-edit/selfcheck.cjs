@@ -89,6 +89,13 @@ check('state 暴露 recentOps / liveSessions', /recentOps/.test(host) && /liveSe
 check('转发官方 props', /React\.createElement\(Original, props\)/.test(client))
 check('样式自带 data-plugin', /setAttribute\('data-plugin'/.test(client))
 
+// 5) 撤回确认弹窗：必须是自绘的 DSH 原生风格，不能用系统框
+check('撤回确认走行内气泡（不再 window.confirm / 不用全屏遮罩）', !/window\.confirm\s*\(/.test(client) && /className: 'me-confirm'/.test(client) && !/me-confirm-mask/.test(client))
+check('确认气泡挂在消息行内（.me-root 的子元素）', /'data-confirming'/.test(client) && /me-root\[data-confirming="1"\]/.test(client) && /confirmRef/.test(client))
+check('气泡视觉抄官方弹层/菜单取值', /--dsw-menu-surface-fill/.test(client) && /--dsw-radius-lg/.test(client) && /--dsw-elevation-panel/.test(client))
+check('气泡按钮抄官方 Button 原子（sm 尺寸）', /--dsw-alias-button-primary-fill/.test(client) && /--dsw-alias-button-primary-hover/.test(client) && /--dsw-alias-interactive-bg-hover/.test(client) && /height:28px;padding:0 10px/.test(client))
+check('气泡关闭语义（Enter 确认 / Esc 取消 / 点外面取消）', /event\.key === 'Escape'/.test(client) && /event\.key === 'Enter'/.test(client) && /addEventListener\('mousedown', onDown, true\)/.test(client))
+
 const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
 check('package.json 不再自带 bundle（它是拓展包的成员）', !(pkg.dsh && pkg.dsh.bundle))
 check('package.json 声明客户端半边', pkg.dsh && pkg.dsh.client && pkg.dsh.client.platform === 'web')
