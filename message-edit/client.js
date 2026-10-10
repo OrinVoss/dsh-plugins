@@ -41,6 +41,8 @@ window.__ModuleLoader__.load({
     const API = '/message-edit-api'
     const SLOT = 'conversation.chat.node'
     const HIDDEN_ATTR = 'data-msg-edit-hidden'
+    /** 遮蔽节点（撤回/编辑占位）的 source.kind，与宿主侧 RECALL_SOURCE 一致。 */
+    const RECALL_KIND = 'message-edit'
     const ROW_SELECTOR = '[data-chat-flow-key]'
     /** 退出编辑的动画时长；必须与 CSS 里 `me-edit-morph-out` 的时长一致。 */
     const CLOSE_MS = 150
@@ -318,6 +320,17 @@ window.__ModuleLoader__.load({
         if (first !== -1 && index >= first && index <= last) row.setAttribute(HIDDEN_ATTR, '1')
         else row.removeAttribute(HIDDEN_ATTR)
       })
+      // 例外：**撤回/编辑的占位节点必须留着**。官方把它渲染成「上下文」注入行
+      // （conversation.chat.node 里 kind !== 'user' 的 user/message 都走 ContextInjectionRow，
+      // 折叠摘要取 source.summary）——它就是用户唯一能看到"这里被撤回了"的地方；
+      // 而它和它遮蔽的消息同属一轮，不加例外会被整轮藏掉（2026-10-11 用户反馈）。
+      // 识别优先看自己打的标记，其次看官方注入行的 producer 标签（= source.kind）。
+      rows.forEach((row) => {
+        const tagged = row.querySelector('[data-context-source]')
+        const isMask = row.querySelector('[data-me-mask="1"]') !== null
+          || (tagged !== null && (tagged.textContent || '').trim() === RECALL_KIND)
+        if (isMask) row.removeAttribute(HIDDEN_ATTR)
+      })
     }
 
     // ------------------------------------------------------------------ 组件
@@ -418,6 +431,9 @@ window.__ModuleLoader__.load({
         const [placement, setPlacement] = React.useState('below')
         const confirmRef = React.useRef(null)
         const originalText = React.useMemo(() => textOf(data), [data])
+        // 这个节点是不是本插件写下的遮蔽占位（撤回/编辑）？
+        const isRecallMask = data.source !== null && typeof data.source === 'object'
+          && data.source.kind === RECALL_KIND
         const inputRef = React.useRef(null)
 
         // 与官方 QueueEditor 同款：随内容自增高，长到 CSS 上限（40vh）后自己滚。
@@ -644,6 +660,15 @@ window.__ModuleLoader__.load({
           }
         }, [confirming, run])
 
+        // 遮蔽占位节点：只让官方把它渲染成「上下文」注入行，不加任何按钮/编辑态。
+        if (isRecallMask) {
+          return React.createElement('div', {
+            ref: rootRef,
+            'data-me-mask': '1',
+            style: { display: 'contents' },
+          }, Original === undefined ? null : React.createElement(Original, props))
+        }
+
         if (editing) {
           // **无缝**：官方消息本体照常渲染（所以上面的图片/附件/引用摘要一个都不丢），
           // 编辑框用实测盒子**原位覆盖**在文字气泡上（白底 + 蓝描线），
@@ -864,7 +889,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=11 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=12 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))

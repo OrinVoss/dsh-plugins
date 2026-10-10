@@ -128,6 +128,34 @@ DSH 自己的压缩同样是留一条**模型可见**的 checkpoint 消息，所
 
 隐藏用的是**遮蔽 slot 渲染器**而不是改 DOM：wrap `conversation.chat.node` 的每一种 kind，
 当 `node.location.turn.turn ∈ hiddenTurns` 时渲染 `null`——干净的 React 卸载，官方逻辑完全不受影响。
+（当前实现按行过滤：给 `[data-chat-flow-key]` 行打 `data-msg-edit-hidden` 再 `display:none`，
+并在 DOM 变化后重放。）
+
+#### ⚠️ 例外：遮蔽节点本身必须可见（2026-10-11 修正）
+
+隐藏是**按轮次**的，而遮蔽节点和被它遮蔽的消息**同属一轮**，所以占位节点一开始被一起藏掉了：
+用户只看到"这一段凭空消失"，看不到"这里被撤回了"。用户原话："每一轮上下文都有三次注入
+（AGENTS.md / runtime-context / time-context），怎么撤回之后没有注入这一条？"
+
+正解是**让官方自己渲染这一行**。官方 Chat 对 `user/message` 里 `source.kind !== 'user'` 的一律
+渲染 `ContextInjectionRow`（就是那三条「上下文」注入行的实现）：
+
+| 位置 | 取值 |
+|---|---|
+| 折叠标题 | locale `message.contextInjection`（「上下文」） |
+| 折叠摘要 | `source.summary`，**只对 `form: 'notice'` 生效**（官方 `noticeSummary()`） |
+| 展开正文 | 模型看到的那串 content（`ModelFacingContent`） |
+| producer 标签 | `source.kind`（本项目里是 `message-edit`） |
+
+所以遮蔽节点的 source 写成 `{ kind: 'message-edit', form: 'notice', summary: RECALL_NOTICE[action] }`，
+客户端只做两件事：
+
+1. 被遮蔽的轮次照常隐藏，但**豁免这一行**——按官方注入行的 `[data-context-source]` 文本（=kind）
+   或我们自己的 `data-me-mask` 标记识别；
+2. 对这一行不加编辑/撤回按钮（用 `display:contents` 包一层，官方 DOM 结构不变）。
+
+官方 `KNOWN_FORMS = ["instructions", "catalog", "snapshot", "notice", "relay", "recall"]`：
+不写 `form` 会退化成"opaque"原始文本，写 `notice` + `summary` 才能在折叠状态下读到人话。
 
 ### 5. `user` 渲染器怎么加按钮而外观不变
 

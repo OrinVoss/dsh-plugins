@@ -67,6 +67,8 @@ check('撤回是掉头箭头（U-turn + 左端箭头）', /M2 6\.5H10A3 3 0 0 1 
 check('编辑态白底 + 蓝描线', /background:var\(--dsw-alias-bg-base,#fff\)/.test(client) && /border:1px solid var\(--dsw-alias-state-business-primary/.test(client))
 check('编辑态几何与气泡一致（1px 边框用内边距抵消）', /padding:9px 15px/.test(client))
 check('编辑态复用原气泡实测盒子', /measureBubbleBox/.test(client) && /getBoundingClientRect\(\)/.test(client))
+check('遮蔽占位节点走官方「上下文」注入行（form=notice + summary）', /form: 'notice', summary: RECALL_NOTICE\[action\]/.test(host) && /const RECALL_NOTICE = \{/.test(host))
+check('遮蔽占位节点不被整轮隐藏（它是用户唯一能看到"这里被撤回"的地方）', /data-me-mask/.test(client) && /querySelector\('\[data-context-source\]'\)/.test(client) && /isRecallMask/.test(client))
 check('✓/✕ 不进盒子（盒子高度==气泡高度）', /me-editor-actions\{position:absolute;right:0;top:calc\(100% \+ 4px\)/.test(client))
 check('盒子宽度不被 CSS 上限压过实测值', /me-editor\{box-sizing:border-box;max-width:100%/.test(client))
 const editingBranch = client.slice(client.indexOf('if (editing) {'), client.indexOf("className: 'me-editor'"))
