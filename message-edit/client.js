@@ -87,9 +87,14 @@ window.__ModuleLoader__.load({
   [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]):focus-within .me-actions{opacity:1}
 }
 /*
+ * 编辑态：官方消息本体照常渲染（附件/图片/引用摘要都不丢），编辑器原位覆盖在气泡上，
+ * 所以此时把插进原生操作行的那两个按钮收起来，并撤掉为它们预留的 padding-right。
+ */
+.me-root[data-editing="1"] .me-actions{display:none}
+.me-root[data-editing="1"] [data-clock="start"]{padding-right:0}
+/*
  * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
- * 几何与官方用户气泡完全一致（radius-xl、同字号行高、内容盒同为 10px 16px ——
- * 边框 1px 用内边距 9px 15px 抵消，所以整块不位移不跳尺寸）。
+ * 几何由内联样式给出（实测原气泡的 top/left/宽/最小高），所以整块不位移不跳尺寸。
  */
 .me-editor{box-sizing:border-box;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);
   background:var(--dsw-alias-bg-base,#fff);
@@ -321,7 +326,7 @@ window.__ModuleLoader__.load({
         const [editing, setEditing] = React.useState(false)
         const [draft, setDraft] = React.useState('')
         const [busy, setBusy] = React.useState(false)
-        const [editWidth, setEditWidth] = React.useState(null)
+        const [editBox, setEditBox] = React.useState(null)
         const originalText = React.useMemo(() => textOf(data), [data])
         const inputRef = React.useRef(null)
 
@@ -411,42 +416,73 @@ window.__ModuleLoader__.load({
         const Original = resolveOriginal('user')
 
         /**
-         * 量出当前气泡的实测宽度。
+         * 量出当前气泡的实测盒子（相对 .me-root 的 top/left + 宽高）。
          *
-         * 编辑态要"大小位置跟之前一样"，而官方气泡是 shrink-to-fit 的（`.userStack` 限宽、
-         * 气泡按内容收缩），所以必须实测，不能靠 max-width 猜。层级取
-         * `root > .userRow > .userStack > 最宽的子元素`（最宽的那个就是气泡；
-         * 附件行/引用摘要一般不会更宽）。
+         * 为什么要实测而不是靠 CSS：官方气泡是 shrink-to-fit 的（`.userStack` 限宽、气泡按内容
+         * 收缩），只有量出来才能"原地无缝"。
+         *
+         * 为什么用"背景色非透明"来找气泡：附件行与引用摘要都是透明的，只有 `.bubble` 有填充色
+         * （`--dsw-specific-bubble`）。这样不用碰官方那套哈希类名。
          */
-        const measureBubbleWidth = React.useCallback(() => {
+        const measureBubbleBox = React.useCallback(() => {
           const root = rootRef.current
           if (root === null) return null
           const row = root.firstElementChild
           const stack = row === null ? null : row.firstElementChild
           if (stack === null) return null
-          let width = null
+          let bubble = null
           for (const child of stack.children) {
-            const rect = child.getBoundingClientRect()
-            if (rect.width > 0 && (width === null || rect.width > width)) width = rect.width
+            const style = window.getComputedStyle(child)
+            const background = style.backgroundColor
+            if (background !== '' && background !== 'transparent' && background !== 'rgba(0, 0, 0, 0)') {
+              bubble = child
+              break
+            }
           }
-          return width === null ? null : Math.round(width)
+          if (bubble === null) {
+            // 兜底：取面积最大的子元素（气泡通常就是最大块）。
+            let area = 0
+            for (const child of stack.children) {
+              const rect = child.getBoundingClientRect()
+              if (rect.width * rect.height > area) { area = rect.width * rect.height; bubble = child }
+            }
+          }
+          if (bubble === null) return null
+          const rootRect = root.getBoundingClientRect()
+          const rect = bubble.getBoundingClientRect()
+          if (rect.width <= 0 || rect.height <= 0) return null
+          return {
+            top: Math.round(rect.top - rootRect.top),
+            left: Math.round(rect.left - rootRect.left),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          }
         }, [])
 
         const beginEdit = React.useCallback(() => {
-          setEditWidth(measureBubbleWidth())
+          setEditBox(measureBubbleBox())
           setDraft(originalText)
           setEditing(true)
-        }, [measureBubbleWidth, originalText])
+        }, [measureBubbleBox, originalText])
 
         if (editing) {
-          // 几何与官方用户气泡一致（宽度实测复用原气泡宽度 / radius-xl / 内容盒 10px 16px /
-          // 同字号行高），所以点编辑时气泡原地变成输入态：白底 + 蓝描线，不跳、不错位。
+          // **无缝**：官方消息本体照常渲染（所以上面的图片/附件/引用摘要一个都不丢），
+          // 编辑框用实测盒子**原位覆盖**在文字气泡上（白底 + 蓝描线），
+          // 因此位置、宽度、最小高度都与原气泡完全一致，不会跳。
           // 按键行为照抄 QueueDock 的 QueueEditor：Enter 保存、Shift+Enter 换行、Esc 取消。
-          return React.createElement('div', { className: 'me-root', ref: rootRef },
-            React.createElement('div', {
-              className: 'me-editor',
-              style: editWidth === null ? undefined : { width: `${editWidth}px`, minWidth: '180px' },
-            },
+          const boxStyle = editBox === null
+            ? { position: 'absolute', right: 0, bottom: 0, minWidth: '180px' }
+            : {
+                position: 'absolute',
+                top: `${editBox.top}px`,
+                left: `${editBox.left}px`,
+                width: `${editBox.width}px`,
+                minWidth: '180px',
+                minHeight: `${editBox.height}px`,
+              }
+          return React.createElement('div', { className: 'me-root', ref: rootRef, 'data-editing': '1' },
+            Original === undefined ? null : React.createElement(Original, props),
+            React.createElement('div', { className: 'me-editor', style: boxStyle },
               React.createElement('textarea', {
                 ref: inputRef,
                 className: 'me-editor-input',
