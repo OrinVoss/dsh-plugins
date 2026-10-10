@@ -52,9 +52,12 @@ window.__ModuleLoader__.load({
       save: CN ? '保存并重新发送' : 'Save & resend',
       cancel: CN ? '取消编辑' : 'Cancel editing',
       editing: CN ? '编辑这条消息' : 'Edit this message',
-      confirm: (turn) => (CN
-        ? `撤回后，这条消息及其之后的对话（第 ${turn} 轮起）将不再进入模型上下文。\n\n原始会话日志仍会保留，但这一段会从当前对话视图里隐藏。\n\n确定撤回吗？`
-        : `This message and everything after it (turn ${turn}+) leaves the model context.\n\nThe raw session log keeps them; this chat view hides that span.\n\nRecall anyway?`),
+      confirmTitle: CN ? '撤回这段对话？' : 'Recall this conversation?',
+      confirmBody: (turn) => (CN
+        ? `这条消息及其之后的对话（第 ${turn} 轮起）将不再进入模型上下文。\n原始会话日志仍会保留，只是从当前对话视图里隐藏。`
+        : `This message and everything after it (turn ${turn}+) leaves the model context.\nThe raw log keeps them; this chat view hides that span.`),
+      confirmOk: CN ? '撤回' : 'Recall',
+      confirmCancel: CN ? '取消' : 'Cancel',
       busy: CN ? '当前轮次还没跑完，等它结束再操作。' : 'The current turn is still running; try again when it finishes.',
       failed: CN ? '操作失败：' : 'Failed: ',
       empty: CN ? '内容不能为空。' : 'Text cannot be empty.',
@@ -152,6 +155,50 @@ window.__ModuleLoader__.load({
   background:var(--dsw-specific-menu,rgba(30,30,30,.92));color:var(--dsw-alias-label-primary,#fff);
   border-radius:var(--dsw-radius-lg,12px);padding:7px 14px;font-size:13px;line-height:20px;
   box-shadow:var(--dsw-elevation-prominent,0 6px 24px rgba(0,0,0,.25));pointer-events:none;opacity:.96}
+/*
+ * 撤回确认气泡：**挂在消息行内**的小弹层，不做全屏遮罩。
+ *
+ * 为什么不用全屏 Mask + Dialog（2026-10-10 真机反馈）：挂在 document.body 上的固定层
+ * 会被 DSH 应用自身的 overlay 层盖住——视觉上能看到（看着像"弹出来了"），但按钮收不到
+ * 点击，表现为"取消不了、撤回也撤回不了"，还会把整个界面挡住。挂进消息行（.me-root 的
+ * 子元素）之后：天然在应用 DOM 树里不会被压住、不遮挡界面、点外面或按 Esc 就能关，
+ * 观感就是"消息下面的一个小气泡"。
+ *
+ * 视觉抄官方弹层/菜单：--dsw-menu-surface-fill + --dsw-menu-backdrop-filter +
+ * --dsw-radius-lg + --dsw-elevation-panel；按钮抄官方 Button 原子的 .sm 尺寸
+ * （28px 高 / 12px 字号 / radius-sm），配色与 hover 取值同样来自官方原子。
+ */
+/*
+ * 注意：**不要**给 .me-root 抬 z-index。曾经这么干过（想压过输入框），结果整条消息
+ * 行（含蓝色气泡本体）都被抬到输入框上面，看起来像气泡浮在输入框里。
+ * 现在方向由翻转保证（气泡永远不会和输入框重叠），层级只需要气泡自己那层 z-index:1，
+ * 它足以盖住后面那些 DOM 靠后但没有定位层级的行。
+ */
+.me-confirm{position:absolute;right:0;top:calc(100% + 6px);z-index:1;
+  box-sizing:border-box;display:flex;flex-direction:column;gap:10px;
+  width:max-content;max-width:min(300px,80vw);padding:12px;
+  border-radius:var(--dsw-radius-lg,12px);
+  background:var(--dsw-menu-surface-fill,var(--dsw-alias-bg-layer-2,#fff));
+  backdrop-filter:var(--dsw-menu-backdrop-filter,none);
+  box-shadow:var(--dsw-elevation-panel,var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.18)));
+  animation:me-confirm-in var(--ds-transition-duration,140ms) var(--ds-ease-in-out,ease-out);
+  max-height:min(40vh,320px);overflow:auto}
+/* 最后一条消息下面就是输入框：放不下时翻到消息上方（由 JS 实测可用空间决定）。 */
+.me-confirm[data-placement="above"]{top:auto;bottom:calc(100% + 6px)}
+.me-confirm-title{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:510;line-height:20px}
+.me-confirm-text{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:pre-wrap}
+.me-confirm-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.me-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;
+  height:28px;padding:0 10px;border:none;border-radius:var(--dsw-radius-sm,6px);cursor:pointer;
+  font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);background:transparent}
+.me-btn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid
+  var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe));outline-offset:2px}
+.me-btn-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}
+.me-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}
+.me-btn-ghost:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.me-btn-ghost:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}
+@keyframes me-confirm-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.me-confirm{animation:none}}
 `
 
     function ensureCss() {
@@ -359,6 +406,9 @@ window.__ModuleLoader__.load({
         const [busy, setBusy] = React.useState(false)
         const [closing, setClosing] = React.useState(false)
         const [editBox, setEditBox] = React.useState(null)
+        const [confirming, setConfirming] = React.useState(false)
+        const [placement, setPlacement] = React.useState('below')
+        const confirmRef = React.useRef(null)
         const originalText = React.useMemo(() => textOf(data), [data])
         const inputRef = React.useRef(null)
 
@@ -422,7 +472,6 @@ window.__ModuleLoader__.load({
               toast(COPY.busy, 'error')
               return
             }
-            if (action === 'retract' && !window.confirm(COPY.confirm(turnOf(node) ?? 0))) return
             const response = await fetch(`${API}/apply`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -516,6 +565,77 @@ window.__ModuleLoader__.load({
           }, CLOSE_MS)
         }, [])
 
+        /**
+         * 气泡方向：默认贴在消息下面；但**最后一条消息的下面就是输入框**
+         * （不透明、层级比对话流高），一律朝下会被它盖住半截。
+         *
+         * 关键坑（真机踩到）：对话流的滚动容器**一直延伸到窗口底边**（输入框是浮在
+         * 它上面的），所以"下方空间"不能拿滚动容器底边算，否则永远算成够用。
+         * 真正的边界是**输入框的顶边**；输入框没有稳定的非哈希类名，这里改成
+         * "页面里最靠下的输入控件就是消息输入框"，拿它的 top 当边界。
+         */
+        React.useLayoutEffect(() => {
+          if (!confirming) return
+          const root = rootRef.current
+          const panel = confirmRef.current
+          if (root === null || panel === null) return
+
+          // 对话区顶部：最近的滚动容器（避免气泡顶到窗口标题栏）
+          let scroller = root.parentElement
+          while (scroller !== null) {
+            const style = window.getComputedStyle(scroller)
+            if (/(auto|scroll)/.test(style.overflowY) && scroller.scrollHeight > scroller.clientHeight + 1) break
+            scroller = scroller.parentElement
+          }
+          const viewport = scroller === null ? null : scroller.getBoundingClientRect()
+
+          // 对话区底部：最靠下的输入控件（= 消息输入框）的顶边
+          let limitBottom = viewport === null ? window.innerHeight : viewport.bottom
+          let lowest = -Infinity
+          for (const field of document.querySelectorAll('input, textarea, [contenteditable="true"]')) {
+            const rect = field.getBoundingClientRect()
+            if (rect.width < 80 || rect.height === 0 || rect.bottom <= lowest) continue
+            lowest = rect.bottom
+            limitBottom = rect.top - 10
+          }
+
+          const box = root.getBoundingClientRect()
+          const panelBox = panel.getBoundingClientRect()
+          const below = limitBottom - box.bottom - 6
+          const above = box.top - (viewport === null ? 0 : viewport.top) - 6
+          setPlacement(panelBox.height <= below || below >= above ? 'below' : 'above')
+        }, [confirming])
+
+        // 确认气泡的关闭语义：点外面 / Esc 关；开着时 Enter 直接确认（与官方弹层一致）。
+        // 用捕获阶段拦 Enter/Esc：语义固定，也不会让官方组件在同一按键上另有动作。
+        React.useEffect(() => {
+          if (!confirming) return undefined
+          const onDown = (event) => {
+            const panel = confirmRef.current
+            const target = event.target
+            if (panel !== null && target instanceof Node && panel.contains(target)) return
+            setConfirming(false)
+          }
+          const onKey = (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              setConfirming(false)
+            } else if (event.key === 'Enter' && event.isComposing !== true) {
+              event.preventDefault()
+              event.stopPropagation()
+              setConfirming(false)
+              void run('retract')
+            }
+          }
+          document.addEventListener('mousedown', onDown, true)
+          document.addEventListener('keydown', onKey, true)
+          return () => {
+            document.removeEventListener('mousedown', onDown, true)
+            document.removeEventListener('keydown', onKey, true)
+          }
+        }, [confirming, run])
+
         if (editing) {
           // **无缝**：官方消息本体照常渲染（所以上面的图片/附件/引用摘要一个都不丢），
           // 编辑框用实测盒子**原位覆盖**在文字气泡上（白底 + 蓝描线），
@@ -579,7 +699,11 @@ window.__ModuleLoader__.load({
           )
         }
 
-        return React.createElement('div', { className: 'me-root', ref: rootRef },
+        return React.createElement('div', {
+          className: 'me-root',
+          ref: rootRef,
+          ...(confirming ? { 'data-confirming': '1' } : {}),
+        },
           Original === undefined ? null : React.createElement(Original, props),
           // 排进原生操作行：给原生行加 padding-right 腾出位置，这两个图标钮补在复制键右侧。
           React.createElement('div', { className: 'me-actions' },
@@ -591,9 +715,33 @@ window.__ModuleLoader__.load({
             React.createElement('button', {
               type: 'button', className: 'me-icon', disabled: busy,
               'aria-label': COPY.retract, title: COPY.retract,
-              onClick: () => { void run('retract') },
+              ...(confirming ? { 'data-active': '1' } : {}),
+              onClick: () => { setConfirming(true) },
             }, React.createElement(IconRetract, {})),
           ),
+          // 确认气泡：**消息行内**的小弹层（不是全屏遮罩），贴在操作行下面、右对齐。
+          confirming
+            ? React.createElement('div', {
+                className: 'me-confirm',
+                ref: confirmRef,
+                role: 'dialog',
+                'aria-label': COPY.confirmTitle,
+                'data-placement': placement,
+              },
+                React.createElement('div', { className: 'me-confirm-title' }, COPY.confirmTitle),
+                React.createElement('p', { className: 'me-confirm-text' }, COPY.confirmBody(turnOf(node) ?? 0)),
+                React.createElement('div', { className: 'me-confirm-actions' },
+                  React.createElement('button', {
+                    type: 'button', className: 'me-btn me-btn-ghost',
+                    onClick: () => { setConfirming(false) },
+                  }, COPY.confirmCancel),
+                  React.createElement('button', {
+                    type: 'button', className: 'me-btn me-btn-primary', autoFocus: true,
+                    onClick: () => { setConfirming(false); void run('retract') },
+                  }, COPY.confirmOk),
+                ),
+              )
+            : null,
         )
       }
     }
@@ -708,7 +856,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=5 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=10 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))

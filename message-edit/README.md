@@ -60,14 +60,40 @@ type SurfaceOp = 'append' | { op: 'replace'; startSeq: SessionSeq; endSeq: Sessi
 但不再出现在 `deriveMessages()` 里。**压缩（compaction）用的就是这个机制**——它用一条
 `user/message` 摘要 checkpoint 遮蔽一整段。
 
-本插件做的是同一件事，只是换成一条**空的 `system/message`**。为什么是它：
+本插件做的是同一件事，用一条**遮蔽节点**（`user/message`）把 `[目标 … 末尾]` 换掉。
+
+#### ⚠️ 为什么遮蔽节点必须是 `user/message`（2026-10-10 修正）
+
+format v4 把事件分成两类（源码 `dsh-session-format-v3-to-v4` 的 `Relationships`）：
+
+```ts
+const STEP_EVENT_TYPES = new Set(['system/message', 'developer/message', 'assistant/attempt'])
+```
+
+这三类事件的 `data.turn` / `data.step` **必须等于写入那一刻打开的 turn+step**，否则整条日志在
+**下一次加载**时抛 `SessionFormatError: <type> does not match an open turn and step`，会话直接打不开
+（`session.append()` 只做事件自身校验、不做关系校验，所以**写的时候不报错**，坑在下次加载）。
+
+撤回/编辑发生在**空闲**（两轮之间）时没有任何打开的 step。旧版用的「空 content 的 `system/message`」
+正好踩中这条，2026-10-08～10-10 写坏了 3 条会话（已用 `_sessdiag/repair_logs.py` 挪进打开的 step 修好，
+原文件备份为 `session.v4.jsonl.zstd.repair-bak-20261010`）。
+
+各候选的结论：
 
 | 候选 | 结果 |
 |---|---|
-| 空 `user/message` | `deriveEventMessage()` 对 `user/message` **永远返回消息**（哪怕 content 为空）→ 模型会收到一条空用户消息 |
-| `assistant/message` | 禁止携带 `sourceEventSeqs`，而替换事件**必须**带 → 用不了 |
-| `developer/message` | 空 content 能投影成 null，但客户端会把它渲染成「注入上下文」一行 → 不干净 |
-| **空 `system/message`** | ✅ 投影成 `null`（模型看不到）；客户端只「认领」不建节点（界面也不显示）；不覆盖节点 0 就不触发系统提示词保护 |
+| `system/message` / `developer/message` / `assistant/attempt` | ❌ step 作用域事件，空闲位置非法（旧版的 bug 就在这里） |
+| `assistant/message` / `tool/result` | ❌ 同样要求打开的 step（`assistant/message` 还禁止带 `sourceEventSeqs`） |
+| 自定义新事件类型 + message projection | ❌ `validateStoredEvents()` 拒绝未知事件类型；projection 只对内核名单里的 `image/offload` 开放，插件**无法**注册新类型 |
+| **`user/message`** | ✅ 唯一的非 step 表面类型，任何位置都能带 `surfaceOp:replace` |
+
+代价：`deriveEventMessage()` 对 `user/message` **一定会返回消息本身**（`image/offload` 靠 projection 才能改写，
+插件用不了），所以遮蔽节点的 content 写一行占位文本 `RECALL_TEXT`：
+
+- 撤回 → 「（用户撤回了一段对话，其中内容已不再可见，请不要再引用它。）」
+- 编辑 → 「（用户撤回并改写了下面这条消息。）」
+
+DSH 自己的压缩同样是留一条**模型可见**的 checkpoint 消息，所以这是与内核一致的取舍。
 
 ### 2. 替换的硬约束（源码 `dsh-session` 的 `planSurfaceEvent`）
 
@@ -76,11 +102,18 @@ type SurfaceOp = 'append' | { op: 'replace'; startSeq: SessionSeq; endSeq: Sessi
 - `tool/result` 的替换只能改 `content`；表面节点 0（系统提示词）只能被 `system/message` 一对一替换；
 - **没有**「必须整轮 / 必须平衡」的要求——单条 `user/message` 起始的后缀替换是合法的。
 
-### 3. 标记自己的替换事件
+### 3. 标记自己的替换事件 + 日志自检
 
-把空 `system/message` 的 `message.id` 写成 `dsh-recall:<uuid>`。
-每个校验器只要求 `message.id` 是非空字符串（见 `assertMessageEventShape`），所以这是合法且可稳定识别的标记，
-不需要任何额外状态（重启后从日志里重新扫出来即可）。
+`message.id` 写成 `dsh-recall:<uuid>`、`source.kind` 写成 `message-edit`
+（两者都是格式允许的取值），合法且可稳定识别，不需要额外状态（重启后从日志里重新扫出来即可）。
+`isRecallCut()` 仍识别旧日志里那种空 `system/message` 遮蔽事件，隐藏逻辑对历史会话照常生效。
+
+宿主还带一个日志自检 `stepScopeViolations()`，专门盯上面那条不变量：
+
+- `POST /message-edit-api/apply` 的返回值带 `logProblems`（空数组 = 合法）；
+- `POST /message-edit-api/selftest` 既验证新写法写完仍然合法（`log-legal`），
+  也**反向**构造旧版那种非法日志，要求检查器必须抓到（`detector-catches-old-bug`）——
+  否则旧 bug 会静默复活。
 
 ### 4. 客户端为什么还要额外做「隐藏」
 
@@ -108,6 +141,37 @@ return <div className="me-root">
 ```
 
 ---
+
+### 6. 撤回确认气泡：贴着消息行内的小弹层，不用 `window.confirm`
+
+早期版本用 `window.confirm()`，弹出来的是**操作系统对话框**，与 DSH 的视觉语言完全无关。
+
+**第一版改成挂在 `document.body` 的全屏 Mask + Dialog，结果真机上按钮点不动**（2026-10-10 反馈：
+"取消不了，撤回也撤回不了，界面没有任何变化"）：DSH 应用自身有一层全窗口 overlay，
+`body` 级的固定层会被它压住——视觉上能看到（所以看着像弹出来了），但**收不到点击**，
+而且全屏遮罩把整个界面挡住了。
+
+现在的做法是**把气泡挂进消息行**（`.me-root` 的子元素，React 渲染，`confirming` 状态控制）：
+
+- **在应用 DOM 树里**：不会被任何 overlay 压住，点击必然生效；不遮挡界面，点外面或按 `Esc` 就关。
+- **视觉**：抄官方弹层/菜单取值 `--dsw-menu-surface-fill` + `--dsw-menu-backdrop-filter` +
+  `--dsw-radius-lg` + `--dsw-elevation-panel`；进入动画只有 `opacity`（官方 `modalEnter` 就是这样）；
+  `prefers-reduced-motion` 下关闭。
+- **按钮**：抄官方 Button 原子的 `.sm` 尺寸（28px 高 / 12px 字号 / `--dsw-radius-sm` / `padding:0 10px`），
+  主按钮 `--dsw-alias-button-primary-fill`+`-hover`，次按钮 ghost 用 `--dsw-alias-interactive-bg-hover`+`-active`。
+- **位置**：`position:absolute; right:0; top:calc(100% + 6px)`——就在这条消息下面、右对齐；
+  开着时给 `.me-root` 加 `data-confirming="1"`（`z-index:30`）压过后续行。
+- **行为**：`Enter` 确认、`Esc` 取消、点气泡外面取消、初始焦点在主按钮上（均在捕获阶段拦按键，
+  避免官方组件在同一按键上另有动作）；确认后才走 `/apply`，`busy` 期间撤回键禁用。
+- **方向**：默认在消息下面；打开时实测可用空间，**下面被输入框占住就翻到消息上方**
+  （`.me-confirm[data-placement="above"]{top:auto;bottom:calc(100% + 6px)}`）。
+  ⚠️ 坑 1（真机踩到）：对话流的滚动容器**一直延伸到窗口底边**，输入框是浮在它上面的——
+  边界必须取**输入框顶边**（"页面里最靠下的输入控件"就是它），否则"下方空间"永远算成够用，
+  最后一条消息的气泡会被输入框盖掉半截。
+  ⚠️ 坑 2：**不要给 `.me-root` 抬 z-index**。曾经为了让气泡压过输入框而给整行加
+  `z-index:30`，结果连消息本体（蓝色气泡）也被抬到输入框上面，看起来像气泡钻进了输入框。
+  翻转已经保证气泡不会和输入框重叠，层级只需留给气泡自己（`z-index:1`，足以盖住后面
+  那些 DOM 靠后但没有定位层级的行）。
 
 ## 三、HTTP 接口
 

@@ -109,18 +109,20 @@ MCP 工具名（`mcp__server__tool`）会取最后一段再归类。
 
 ## 安装
 
-本包是**组合包（bundle）**。profile（`~/.dsh/profiles/desktop`）三处：
+本包是**拓展包（`dsh-style-extras`）组合包的成员**——加载行由拓展包的
+[`cordis.patch.yml`](../style-extras/cordis.patch.yml) 声明（`insert id: pet`）。
 
-1. `package.json` 的 `dependencies`：
+profile（`~/.dsh/profiles/desktop`）侧：
+
+1. `package.json` 的 `dependencies` 里 link 本包（**必须**，否则包名解析不到）：
    ```json
    "dsh-pet": "link:C:/Users/17040/.dsh/plugins/pet"
    ```
-2. `package.json` 的 `dsh.profile.bundles` 里列出 **`dsh-pet`**。
-3. `cordis.patch.yml` 里**不要**再 insert `id: pet`——加载行由本包的
-   [`cordis.patch.yml`](cordis.patch.yml) 声明，同一 id 插两次会加载两遍。
+2. `dsh.profile.bundles` 里列的是 **`dsh-style-extras`**，**不是本包**——
+   本包自己不带 `dsh.bundle`，也没有自己的 patch 文件（同一 id 只能声明一次）。
 
-装完重启桌面端：侧栏「插件」页会出现「桌面宠物」卡片，右侧浮层里出现宠物，
-设置 → 通用 里多出「宠物」一行。
+装完重启桌面端：侧栏「插件」页点开「拓展包」卡片，能看到**桌面宠物**这一行，
+右侧浮层里出现宠物，设置 → 通用 里多出「宠物」一行。
 
 ## 宿主接口
 

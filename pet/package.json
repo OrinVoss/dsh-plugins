@@ -13,9 +13,6 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
     "client": {
       "platform": "web",
       "immediately": true,
@@ -25,7 +22,6 @@
   "files": [
     "host.js",
     "client.js",
-    "cordis.patch.yml",
     "icon.svg",
     "locale/*.json",
     "selfcheck.cjs",

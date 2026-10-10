@@ -3,7 +3,7 @@
 //   node selfcheck.cjs
 //
 // 覆盖：包声明（组合包 patch / 图标 / locale 导出）、patch 的五条 insert 与
-// 配置、locale 元信息、图标文件（存在、是 SVG、≤256 KiB）、以及五个成员包
+// 配置、locale 元信息、图标文件（存在、是 SVG、≤256 KiB）、以及六个成员包
 // 是否作为同级目录存在并各自带好图标与 locale 元信息。
 const fs = require('fs')
 const path = require('path')
@@ -14,6 +14,7 @@ const MEMBERS = [
   { dir: 'token-stats', pkg: 'dsh-token-stats', rowId: 'token-stats' },
   { dir: 'sysmon', pkg: 'dsh-sysmon', rowId: 'sysmon' },
   { dir: 'skins', pkg: 'dsh-skins', rowId: 'skins' },
+  { dir: 'pet', pkg: 'dsh-pet', rowId: 'pet' },
   { dir: 'btw', pkg: 'dsh-btw', rowId: 'btw' },
   { dir: 'message-edit', pkg: 'dsh-message-edit', rowId: 'message-edit' },
 ]
@@ -110,7 +111,7 @@ test('组合包自己有图标与中英元信息', () => {
   checkLocale(DIR, 'style-extras')
 })
 
-console.log('\n[4] 五个成员包（同级目录）')
+console.log('\n[4] 六个成员包（同级目录）')
 
 for (const m of MEMBERS) {
   const dir = path.join(SIBLING_ROOT, m.dir)
