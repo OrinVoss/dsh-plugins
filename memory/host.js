@@ -50,8 +50,8 @@ try {
     delete require.cache[require.resolve('./lib/store')]
     delete require.cache[require.resolve('./lib/health')]
   } catch (_) { /* 首次加载时缓存里本来就没有 */ }
-  storeLib = freshRequire('./lib/store')
-  healthLib = freshRequire('./lib/health')
+  storeLib = require('./lib/store')
+  healthLib = require('./lib/health')
 } catch (err) {
   reportLoadError(err)
   throw err
@@ -123,37 +123,6 @@ function attempt(toolName, fn) {
   }
 }
 
-/**
- * 文件区块通道（AGENTS.md / AGENTS.local.md）是否生效。
- *
- * 新规则（2026-10-09）：能用系统提示词通道时**不再写文件** —— 文件是"插件关掉后仍留着、
- * 仍被官方加载器注入"的东西（内容里的 memory_search/memory_read 那时已不存在），
- * 而系统提示词段 / runtime context 都是作用域 effect，随插件销毁，内容与事实始终一致。
- *   · 显式 injectProjectBlock:false 关闭（老语义保留）
- *   · promptInjection.enabled:false 是回滚开关：恢复文件通道并在下次启动重写区块
- */
-function fileBlocksEnabled(ctx, cfg) {
-  const promptOn = !(cfg && cfg.promptInjection && cfg.promptInjection.enabled === false) && !!(ctx && ctx.systemPrompt)
-  return (cfg ? cfg.injectProjectBlock !== false : true) && !promptOn
-}
-
-/**
- * 清掉 require 缓存后再加载插件自己的 lib 模块。
- * 为什么必须这样：DSH 的 HMR 只重挂载入口（host.js），**Node 的 require 缓存不会失效**，
- * 于是 applyInner 里 require('./lib/x') 一直拿到首次加载的旧版本 —— 实测表现为
- * 「改了 lib/retrieve.js 加了 seenWithin，运行时却报 retrieve.seenWithin is not a function」。
- * 代价只是每次重挂载重新求值一遍纯模块，可忽略。
- */
-function freshRequire(rel) {
-  const p = require.resolve(rel)
-  delete require.cache[p]
-  return require(p)
-}
-// 系统提示词注入的缓存失效钩子：由 applyInjection 赋值、applyInner 的 sync() 调用。
-// 放模块级是必须的 —— 之前声明在 applyInner、赋值在 applyHttp（两个不同函数），
-// 实测报 "invalidatePromptCache is not defined"。
-let invalidatePromptCache = () => {}
-
 function applyInner(ctx, config) {
   const cfg = config || {}
   const store = createStore({
@@ -164,32 +133,20 @@ function applyInner(ctx, config) {
     autoCommit: cfg.autoCommit,
     injectProjectBlock: cfg.injectProjectBlock,
     projectBlockFile: cfg.projectBlockFile,
-    maxProjectBlockBytes: cfg.maxProjectBlockBytes,
-    blockMode: cfg.blockMode,
-    sectionHints: cfg.sectionHints,
-    triggerLines: cfg.triggerLines
+    maxProjectBlockBytes: cfg.maxProjectBlockBytes
   })
   const autoSync = cfg.autoAgentsSync !== false
-  const fileBlocks = fileBlocksEnabled(ctx, cfg)
 
   const sync = (cwd) => {
     if (!autoSync) return
     try {
-      if (fileBlocks) {
-        store.syncAgents(cwd)
-        // 有 cwd 时顺带把「工作区记忆」区块写进工作区自己的指令文件（默认 AGENTS.local.md）。
-        // 全局区块进 ~/.dsh/AGENTS.md，两者互不影响；没有项目条目时这个调用是空操作。
-        if (cwd) {
-          const ws = store.syncWorkspaceAgents(cwd)
-          if (ws && ws.changed) ctx.logger.info('dsh-memory: 已同步工作区记忆区块 → %s', ws.path)
-        }
-      } else {
-        // 文件通道已退休（记忆索引改走系统提示词段 / runtime context）：顺手摘掉历史遗留的托管区块。
-        const r = store.stripFileBlocks(cwd)
-        if (r.global && r.global.changed) ctx.logger.info('dsh-memory: 已摘掉 AGENTS.md 托管区块（改走系统提示词通道）→ %s', r.global.path)
-        if (r.project && r.project.changed) ctx.logger.info('dsh-memory: 已摘掉工作区记忆区块 → %s', r.project.path)
+      store.syncAgents(cwd)
+      // 有 cwd 时顺带把「工作区记忆」区块写进工作区自己的指令文件（默认 AGENTS.local.md）。
+      // 全局区块进 ~/.dsh/AGENTS.md，两者互不影响；没有项目条目时这个调用是空操作。
+      if (cwd) {
+        const ws = store.syncWorkspaceAgents(cwd)
+        if (ws && ws.changed) ctx.logger.info('dsh-memory: 已同步工作区记忆区块 → %s', ws.path)
       }
-      invalidatePromptCache()
     } catch (err) {
       ctx.logger.warn('dsh-memory: 同步 AGENTS.md 失败: %o', err)
     }
@@ -403,14 +360,6 @@ function applyInner(ctx, config) {
     })
   }
 
-  // 三条注入通道在主 ctx 上注册（**不依赖 webServer，也不受 settingsPage 开关影响**）：
-  //   ① L1 检索注入  ② 压缩保护段  ③ 记忆索引（系统提示词段 + runtime context）
-  try {
-    applyInjection(ctx, store, cfg)
-  } catch (err) {
-    ctx.logger.warn('dsh-memory: 注入注册失败（记忆工具与文件区块不受影响）: %o', err)
-  }
-
   // 启动时先同步一次，让 AGENTS.md 里的记忆索引立即生效
   if (autoSync && cfg.syncOnStartup !== false) sync(null)
 
@@ -461,328 +410,6 @@ function readJsonBody(req) {
     })
     req.on('error', reject)
   })
-}
-
-/**
- * 记忆的三条注入通道（都注册在**主 ctx** 上，与设置页接口无关）：
- *   ① L1 检索注入：agent/pre-step，按当前用户消息检索记忆库
- *   ② 压缩保护段：system-prompt section，要求压缩摘要保留检索条目
- *   ③ 记忆索引注入：system-prompt section（全局 L0）+ context（工作区项目索引）
- *
- * 为什么单独抽成一个函数：它们原先被我追加在 applyHttp（设置页接口）末尾，而 applyHttp 只在
- * `settingsPage !== false` 且存在 webServer 时才被调用 ⇒ settingsPage:false 会误关这三样、
- * 没有 webServer 的 profile 里则永不注册；另外还造成过"声明在 applyInner、赋值在 applyHttp"
- * 的作用域错位（实测报 invalidatePromptCache is not defined）。
- */
-function applyInjection(ctx, store, cfg) {
-  const fileBlocks = fileBlocksEnabled(ctx, cfg)
-  const strippedWorkspaces = new Set()   // 已摘过遗留文件区块的工作区（幂等，只做一次）
-  // 是否已经**真的**产出过非空的工作区上下文文本。只有为真才允许摘掉工作区的文件区块
-  // （否则一旦 runtime context 那条渲染成空，工作区索引就彻底看不见了）。
-  let contextChannelProven = false
-  // ---- L1：按当前用户消息检索记忆，只注入命中的几条（2026-10-09）
-  // 依据：10 天实测 456 个被注入会话里 86.2% 从未用过记忆工具；48 条从未被读的条目里 41 条主题
-  // 在会话里出现过（投递失败）。所以把"模型自己想起来搜"换成"相关记忆自动出现"。
-  // 三条硬约束（只追加 / 确定性 / 会话内去重）见 lib/retrieve.js 顶部注释。
-  const retrieveCfg = (cfg.retrieve && typeof cfg.retrieve === 'object') ? cfg.retrieve : {}
-  const retrieveEnabled = retrieveCfg.enabled !== false
-  const RETRIEVE = {
-    k: Number.isFinite(retrieveCfg.k) && retrieveCfg.k > 0 ? Math.floor(retrieveCfg.k) : 3,
-    minScore: Number.isFinite(retrieveCfg.minScore) ? retrieveCfg.minScore : 8,
-    maxBytes: Number.isFinite(retrieveCfg.maxBytes) && retrieveCfg.maxBytes > 0 ? Math.floor(retrieveCfg.maxBytes) : 2000,
-    // 同一条目多久之后允许再次注入（按 step 计）。会话内永久去重是错的：DSH 会压缩长会话，
-    // 几十轮前注入的条目可能已不在上下文里，却仍被永久抑制（2026-10-09 实测遇到）。
-    repeatAfterSteps: Number.isFinite(retrieveCfg.repeatAfterSteps) && retrieveCfg.repeatAfterSteps >= 0 ? Math.floor(retrieveCfg.repeatAfterSteps) : 60,
-    // 查询有效长度（去标点空白）低于这个值就不注入 —— 「继续」「ok」这类短消息检索必出噪声
-    minQueryChars: Number.isFinite(retrieveCfg.minQueryChars) && retrieveCfg.minQueryChars >= 0 ? Math.floor(retrieveCfg.minQueryChars) : 4
-  }
-  // 压缩后清空注入记账：压缩会把旧消息 shadow 掉（compaction/prune 的 shadowedSeqs），
-  // 那些"我送过了"的内容可能已经不在上下文里 —— 这时必须允许重新送（2026-10-09 实测：
-  // 本会话 15 个压缩事件、prune 落在 seq 23/29/36/48）。
-  const clearOnCompaction = retrieveCfg.clearOnCompaction !== false
-  const injectedBySession = new Map()   // sessionId → Map<target, 注入时的 step>
-  // 精确版用：sessionId → [{seq, lines}]（自己注入过的消息及其日志 seq/原文），以及被压缩遮掉待补送的行
-  const injectedSeqs = new Map()
-  const lostLines = new Map()
-  const pendingLines = []   // 刚注入、还没等到 session/event 回填 seq 的行
-  const INJECT_LOG = require('node:path').join(require('node:os').tmpdir(), 'dsh-memory-l1.log')
-  const logInject = (o) => {
-    if (retrieveCfg.log === false) return
-    try { require('node:fs').appendFileSync(INJECT_LOG, JSON.stringify(Object.assign({ t: new Date().toISOString() }, o)) + '\n') } catch (_) { /* 日志不许影响主流程 */ }
-  }
-
-  if (retrieveEnabled) {
-    try {
-      const retrieve = freshRequire('./lib/retrieve')
-      // **只用 ctx 注册**（作用域绑定 → 插件关闭/卸载时 cordis 自动摘除监听器）。
-      //
-      // 这里曾经有一套"发射器回退链"（ctx.on → ctx.root.on → ctx.app.on → ctx.scope.on），
-      // 起因是报 "ctx.on is not a function"。2026-10-09 用 apply 指纹探针测清楚后删掉了：
-      //   · 正常重挂载 = **1 次 apply，ctx 完整**（有 .on / systemPrompt / agents / sessions / tools / root）
-      //   · 报错的那几次来自**其他作用域的 apply**（受限 ctx，只有 logger/effect/inject/webServer/tools），
-      //     那些作用域本来就注册不了东西，也不该注册
-      //   · 回退链反而带来真隐患：一旦落到 `ctx.root`，监听器就绑在**根作用域**上、**不随插件销毁**
-      // 所以现在：能注册就注册，不能就跳过（受限作用域属预期，降级为 info 日志）。
-      if (typeof ctx.on !== 'function') {
-        let shape = ''
-        try { shape = Object.keys(ctx || {}).slice(0, 25).join(',') } catch (_) { shape = '(取键失败)' }
-        logInject({ ev: 'l1-skipped', reason: 'no-event-api', ctxKeys: shape })
-        throw new Error('本作用域没有事件 API（受限作用域，跳过 L1）')
-      }
-      const emitter = { label: 'ctx', t: ctx }
-      emitter.t.on('agent/pre-step', async (payload, next) => {
-        const decision = await next()
-        try {
-          const list = Array.isArray(payload && payload.messages) ? payload.messages : []
-          logInject({ ev: 'enter', step: payload && payload.step, n: list.length })
-          const query = retrieve.userTurnText(list)
-          // 工具续跑步骤没有新用户消息 → 不注入（省 token，也让前缀保持稳定）
-          if (!query) return decision
-          // 太短的消息（「继续」「ok」）关键词检索必出噪声 → 直接跳过，别注入垃圾
-          if (retrieve.effectiveLength(query) < RETRIEVE.minQueryChars) {
-            logInject({ ev: 'skip-short-query', sessionId: (payload.agent && payload.agent.session && payload.agent.session.header && payload.agent.session.header.id) || 'default', query: query.slice(0, 40), len: retrieve.effectiveLength(query) })
-            return decision
-          }
-          if (!decision || !Array.isArray(decision.messages)) return decision
-          const header = (payload.agent && payload.agent.session && payload.agent.session.header) || {}
-          const sessionId = header.id || 'default'
-          const cwd = header.cwd || null
-          // 记下会话 cwd 作兜底：组装上下文（{agent,scope}）里取 cwd 要过 cordis 的属性门控，
-          // 未必取得出来；这里是最可靠的来源（L1 钩子能正常按它检索项目库）。
-          if (cwd) globalThis.__dshMemoryLastCwd = cwd
-          // 文件通道已退休：本会话第一次拿到 cwd 时，摘掉该工作区历史遗留的托管区块（幂等，每 cwd 一次）。
-          // **但要等 context 通道被证明产出过非空内容**（contextChannelProven）—— 否则一旦摘了文件、
-          // runtime context 那条又渲染成空（组装上下文里取不到 cwd），工作区索引就彻底看不见了。
-          // 全局那条不受此限：系统提示词段已验证生效，所以全局文件已经安全删掉。
-          if (!fileBlocks && contextChannelProven && cwd && !strippedWorkspaces.has(cwd)) {
-            strippedWorkspaces.add(cwd)
-            try {
-              const r = store.stripFileBlocks(cwd)
-              if (r.project && r.project.changed) {
-                logInject({ ev: 'stripped-workspace-block', path: r.project.path, deleted: !!r.project.deleted })
-              }
-            } catch (_) { /* 摘不掉不影响注入 */ }
-          }
-          const stepNo = Number.isFinite(payload.step) ? payload.step : 0
-          const injectedMap = injectedBySession.get(sessionId) || new Map()
-          // 去重：主触发器是压缩（见下面的 session/event 监听，压缩会清空记账）；
-          // 这里只是兜底窗口，防止"没有压缩但会话很长"时同一内容反复注入。
-          const seen = retrieve.seenWithin(injectedMap, stepNo, RETRIEVE.repeatAfterSteps)
-          const groups = []
-          if (cwd) { try { groups.push(store.search('project', query, cwd, RETRIEVE.k)) } catch (_) { /* 无项目库 */ } }
-          try { groups.push(store.search('global', query, null, RETRIEVE.k)) } catch (_) { /* 库不可用 */ }
-          const picked = retrieve.pickHits(groups, { seen, k: RETRIEVE.k, minScore: RETRIEVE.minScore, maxBytes: RETRIEVE.maxBytes })
-          // 精确版补送：上一轮被压缩遮掉的注入原文，原样再送一次（最多 k 条，且不与本轮挑选重复）
-          const pending = lostLines.get(sessionId) || []
-          if (pending.length) {
-            const have = new Set(picked.picked.map((p) => p.target))
-            for (const line of pending) {
-              if (picked.picked.length >= RETRIEVE.k) break
-              const m = /`([^`]+)`/.exec(line)
-              const target = m ? m[1] : null
-              if (target && have.has(target)) continue
-              picked.picked.push({ target: target || line.slice(0, 40), title: line, summary: '', restored: true })
-              picked.bytes += Buffer.byteLength(line, 'utf8') + 1
-            }
-            lostLines.delete(sessionId)
-            logInject({ ev: 'restore-after-compaction', sessionId, restored: picked.picked.filter((p) => p.restored).length })
-          }
-          if (!picked.picked.length) {
-            logInject({ ev: 'no-hit', sessionId, query: query.slice(0, 120), scores: groups.map((g) => ({ scope: g && g.scope, top: (g && g.results || []).slice(0, 3).map((x) => x.score) })) })
-            return decision
-          }
-          for (const p of picked.picked) injectedMap.set(p.target, stepNo)
-          if (injectedBySession.size > 50) injectedBySession.delete(injectedBySession.keys().next().value)
-          injectedBySession.set(sessionId, injectedMap)
-          const text = retrieve.renderInjection(picked.picked)
-          const lines = picked.picked.map((p) => retrieve.line(p))
-          // 消息形状：**必须带 source**。只给 {content:[...]} 会让框架在 message.source.kind 上
-          // 抛 "Cannot read properties of undefined (reading 'kind')"，整轮崩掉（2026-10-09 实测，
-          // 用户的提问因此没被收到）。形状依据：官方指令加载器构造的是 {content, source:{kind, form, changes}}；
-          // 自定义 kind 在生产里可行（agent-team-plus 用 kind:"team-message"）。
-          const source = { kind: 'dsh-memory-retrieval', form: 'retrieval', changes: [] }
-          const injected = { content: [{ type: 'text', text }], source }
-          const lastClaimed = decision.messages.findLastIndex((m) => list.includes(m))
-          const at = lastClaimed < 0 ? 0 : lastClaimed + 1
-          logInject({ ev: 'inject', sessionId, bytes: picked.bytes, targets: picked.picked.map((p) => p.target), scores: picked.picked.map((p) => p.score), query: query.slice(0, 120), sourceKind: source.kind, sourceKeys: Object.keys(source) })
-          // 等 session/event 把这条消息的日志 seq 报回来（见下面的监听）
-          pendingLines.push({ sessionId, lines })
-          return Object.assign({}, decision, { messages: decision.messages.toSpliced(at, 0, injected) })
-        } catch (err) {
-          logInject({ ev: 'error', err: String((err && err.message) || err), stack: String((err && err.stack) || '').slice(0, 400) })
-          try { ctx.logger.warn('dsh-memory: L1 注入失败（本轮跳过）: %o', err) } catch (_) { /* 降级 */ }
-          return decision
-        }
-      })
-      // 压缩事件 → 清空该会话的注入记账（下一次用户轮次重新可注入）
-      if (clearOnCompaction) {
-        emitter.t.on('session/event', (session, event) => {
-          try {
-            if (!event || typeof event.type !== 'string') return
-            const sid = (session && (session.id || (session.header && session.header.id))) || null
-            if (!sid) return
-            // ① 自己的注入消息回来了 → 记下它的日志 seq 与原文（靠 source.kind 认出来，不用打标记）
-            if (event.type === 'user/message' && event.data && event.data.source && event.data.source.kind === 'dsh-memory-retrieval') {
-              const idx = pendingLines.findIndex((x) => x.sessionId === sid)
-              if (idx >= 0) {
-                const p = pendingLines.splice(idx, 1)[0]
-                const arr = injectedSeqs.get(sid) || []
-                arr.push({ seq: event.seq, lines: p.lines })
-                injectedSeqs.set(sid, arr)
-                logInject({ ev: 'injection-seq-recorded', sessionId: sid, seq: event.seq, n: p.lines.length })
-              }
-              return
-            }
-            if (!event.type.startsWith('compaction/')) return
-            if (event.type !== 'compaction/end' && event.type !== 'compaction/prune') return
-            // ② 压缩 prune：看有没有自己的注入消息被 shadow 掉 → 记进"待补送"（原文复用，确定性）
-            if (event.type === 'compaction/prune' && event.data && Array.isArray(event.data.shadowedSeqs)) {
-              const shadowed = new Set(event.data.shadowedSeqs)
-              const rec = injectedSeqs.get(sid) || []
-              const lost = []
-              for (const r of rec) if (shadowed.has(r.seq)) lost.push(...r.lines)
-              if (lost.length) {
-                const merged = [...new Set([...(lostLines.get(sid) || []), ...lost])]
-                lostLines.set(sid, merged)
-                logInject({ ev: 'injection-shadowed', sessionId: sid, n: lost.length, totalPending: merged.length })
-              }
-            }
-            const had = injectedBySession.get(sid)
-            if (had && had.size) {
-              injectedBySession.delete(sid)
-              logInject({ ev: 'dedupe-cleared', sessionId: sid, reason: event.type, dropped: had.size })
-            }
-          } catch (_) { /* 清账失败不影响主流程 */ }
-        })
-      }
-      ctx.logger.info('dsh-memory: L1 检索注入已启用（k=%d minScore=%d maxBytes=%d，压缩后清账=%s）', RETRIEVE.k, RETRIEVE.minScore, RETRIEVE.maxBytes, String(clearOnCompaction))
-      logInject({ ev: 'hook-registered', via: emitter.label, retrieveV: retrieve.VERSION, k: RETRIEVE.k, minScore: RETRIEVE.minScore, repeatAfterSteps: RETRIEVE.repeatAfterSteps, clearOnCompaction })
-    } catch (err) {
-      logInject({ ev: 'l1-skipped', err: String((err && err.message) || err) })
-      // 受限作用域属预期路径 → info 级（以前这里是 warn，于是每次全量重载刷一堆假警报）
-      try { ctx.logger.info('dsh-memory: 本作用域跳过 L1 检索注入: %s', (err && err.message) || err) } catch (_) { /* 降级 */ }
-    }
-  }
-
-  // 把"压缩时必须保留 dsh-memory 检索条目"注册进**系统提示词**。
-  // 原理与依据见 lib/compaction-guard.js 顶部注释（摘要模型会逐字回放系统提示词，且它永不被遮蔽）。
-  // 这是**软保证**（靠摘要模型照做）；硬保证是上面那套"压缩后比对 shadowedSeqs 再补送"。
-  const guardCfg = (cfg.compactionGuard && typeof cfg.compactionGuard === 'object') ? cfg.compactionGuard : {}
-  if (guardCfg.enabled !== false) {
-    try {
-      const guard = freshRequire('./lib/compaction-guard')
-      const secText = (typeof guardCfg.text === 'string' && guardCfg.text.trim()) ? guardCfg.text : guard.TEXT
-      const order = Number.isFinite(guardCfg.order) ? guardCfg.order : guard.DEFAULT_ORDER
-      ctx.systemPrompt.section({ name: guard.SECTION_NAME, order, text: secText, interpolate: false })
-      logInject({ ev: 'compaction-guard-registered', guardV: guard.VERSION, order, bytes: Buffer.byteLength(secText, 'utf8') })
-    } catch (err) {
-      logInject({ ev: 'compaction-guard-failed', err: String((err && err.message) || err) })
-      try { ctx.logger.warn('dsh-memory: 注册压缩保护段失败: %o', err) } catch (_) { /* 降级 */ }
-    }
-  }
-
-  // ---- 记忆注入改走插件自己的扩展点（2026-10-09，"根本方案"第一步：双通道并存）
-  //
-  // 为什么不再靠 AGENTS.md 托管区块：那是**文件写入**，插件关掉后区块仍留在文件里、仍被官方
-  // 加载器注入，而区块里写的 memory_search/memory_read 那时已经不存在了（指令与事实不一致）。
-  //
-  // 改用两个都是**作用域 effect**（⇒ 随插件销毁）的扩展点：
-  //   ① ctx.systemPrompt.section()：全局 L0（规则速查 + 专题地图）进**系统提示词** —— 顺带解决
-  //      "注入内容会被压缩遮蔽"的问题（系统提示词永不被遮蔽）。
-  //   ② ctx.systemPrompt.context()：工作区项目索引进 **runtime context**（与 time-context 同一通道，
-  //      仍是每轮的 user 消息），text 传**函数** ⇒ 每次组装按 agent 的 cwd 现算。
-  // 缓存：段文本每次组装都会求值，而 alwaysRules() 要扫全部条目文件 → 5 秒 TTL + 写库后立刻失效。
-  const promptCfg = (cfg.promptInjection && typeof cfg.promptInjection === 'object') ? cfg.promptInjection : {}
-  if (promptCfg.enabled !== false && ctx.systemPrompt && typeof ctx.systemPrompt === 'object') {
-    try {
-      const storeLib = freshRequire('./lib/store')
-      const MARKERS = new Set([storeLib.BLOCK_BEGIN, storeLib.BLOCK_END, storeLib.PROJECT_BLOCK_BEGIN, storeLib.PROJECT_BLOCK_END])
-      const stripMarkers = (t) => String(t || '').split('\n').filter((l) => !MARKERS.has(l.trim())).join('\n').trim()
-      // 组装上下文是 { agent, scope, signal? }，**本身没有 cwd** —— 要从 agent 上取。
-      // 关键（2026-10-09 实测踩到）：**每一条候选都要单独 try**。cordis 按 inject 门控属性访问，
-      // 某一路（如 a.session）会抛错；如果整个函数一个大 try，一条抛错就把后面的候选和探针全跳过，
-      // 表现为"探针不触发 + 渠道渲染成空文本"，很难看出真正原因。
-      let lastCtxProbe = 0
-      const cwdOf = (c) => {
-        const safe = (fn) => { try { return fn() } catch (_) { return undefined } }
-        const cands = [
-          safe(() => c && c.agent && c.agent.session && c.agent.session.header && c.agent.session.header.cwd),
-          safe(() => c && c.agent && c.agent.session && c.agent.session.cwd),
-          safe(() => c && c.scope && c.scope.session && c.scope.session.header && c.scope.session.header.cwd),
-          safe(() => c && c.agent && c.agent.cwd),
-          safe(() => c && c.agent && c.agent.options && c.agent.options.cwd),
-          safe(() => c && c.cwd),
-          safe(() => globalThis.__dshMemoryLastCwd)   // L1 钩子里记下的会话 cwd（兜底）
-        ]
-        const hit = cands.find((x) => typeof x === 'string' && x && !x.includes('dsh-h')) || null
-        try {
-          const now = Date.now()
-          if (now - lastCtxProbe > 5000) {
-            lastCtxProbe = now
-            const safeKeys = (o) => { try { return o ? Object.keys(o).slice(0, 20).join(',') : '(none)' } catch (e) { return 'THROW' } }
-            logInject({
-              ev: 'assembly-context-probe',
-              ctxType: typeof c,
-              keys: safeKeys(c),
-              agentKeys: safeKeys(safe(() => c && c.agent)),
-              scopeKeys: safeKeys(safe(() => c && c.scope)),
-              cands: cands.map((x) => (typeof x === 'string' ? x : String(x))),
-              cwd: hit || '(none)'
-            })
-          }
-        } catch (_) { /* 探针不许影响主流程 */ }
-        return hit
-      }
-      const TTL = 5000
-      let blockCache = { text: '', at: 0 }
-      let projCache = new Map()
-      const renderGlobal = (cwd) => {
-        const now = Date.now()
-        if (blockCache.text && now - blockCache.at < TTL) return blockCache.text
-        blockCache = { text: stripMarkers(store.buildBlock(cwd)), at: now }
-        return blockCache.text
-      }
-      const renderProject = (cwd) => {
-        if (!cwd) return ''
-        const now = Date.now()
-        const hit = projCache.get(cwd)
-        if (hit && now - hit.at < TTL) return hit.text
-        let text = ''
-        try { text = stripMarkers(store.buildProjectBlock(cwd)) } catch (_) { text = '' }
-        // 证据标志：只要真的产出过非空的工作区文本，才允许摘掉该工作区的文件区块（见 L1 钩子里的判断）
-        if (text) contextChannelProven = true
-        projCache.set(cwd, { text, at: now })
-        if (projCache.size > 20) projCache.clear()
-        return text
-      }
-      invalidatePromptCache = () => { blockCache = { text: '', at: 0 }; projCache = new Map() }
-      const sectionOrder = Number.isFinite(promptCfg.sectionOrder) ? promptCfg.sectionOrder : 10250
-      const contextOrder = Number.isFinite(promptCfg.contextOrder) ? promptCfg.contextOrder : 200
-      // 无歧义标记：证明 text 函数到底有没有被调用（探针挂在 cwdOf 里，一有异常就看不到了）
-      let lastCalledProbe = 0
-      const calledProbe = (which) => {
-        try {
-          const now = Date.now()
-          if (now - lastCalledProbe > 5000) { lastCalledProbe = now; logInject({ ev: 'section-text-called', which }) }
-        } catch (_) { /* 探针不许影响主流程 */ }
-      }
-      ctx.systemPrompt.section({
-        name: 'dsh-memory:index',
-        order: sectionOrder,
-        interpolate: false,
-        text: (c) => { calledProbe('section'); return renderGlobal(cwdOf(c)) }
-      })
-      ctx.systemPrompt.context({
-        name: 'dsh-memory:project',
-        order: contextOrder,
-        text: (c) => { calledProbe('context'); return renderProject(cwdOf(c)) }
-      })
-      logInject({ ev: 'prompt-injection-registered', sectionOrder, contextOrder, bytes: Buffer.byteLength(renderGlobal(null), 'utf8') })
-    } catch (err) {
-      logInject({ ev: 'prompt-injection-failed', err: String((err && err.message) || err) })
-      try { ctx.logger.warn('dsh-memory: 注册系统提示词注入失败（回落到文件区块）: %o', err) } catch (_) { /* 降级 */ }
-    }
-  }
 }
 
 function applyHttp(ctx, store, cfg) {
@@ -941,7 +568,7 @@ function applyHttp(ctx, store, cfg) {
 
 module.exports = {
   name: 'dsh-memory',
-  inject: ['tools', 'agents', 'sessions', 'sessionProjections', 'systemPrompt'],
+  inject: ['tools'],
   apply(ctx, config) {
     globalThis.__dshMemoryConfig = config
     try {
@@ -953,33 +580,4 @@ module.exports = {
   },
   applyInner
 }
-
-// 2026-10-09：L0 分层注入（blockMode: layered）+ 工作区记忆区块 + L1 检索注入
-// （agent/pre-step；需要 inject 里声明 'agents'）。改完 lib/*.js 后碰一下本文件即可重挂载。
-// remount #11 (window dedupe)
-// remount #12 (fix dup const)
-// remount #13 (compaction trigger)
-// remount #14 (brace fix)
-// remount #15 (fix source field)
-// remount #16 (explicit source shape)
-// remount #17 (L1 diagnostics)
-// remount #18 (ctx emitter fallback)
-// remount #19 (inject sessions/sessionProjections)
-// remount #20 (freshRequire)
-// remount #21 (freshRequire fixed)
-// remount #22 (all lib via freshRequire)
-// remount #23 (shadow reinject)
-// remount #24 (short query guard)
-// remount #25 (compaction guard)
-// remount #26 (apply fingerprint probe)
-// remount #27 (drop emitter fallback)
-// remount #28 (prompt injection)
-// remount #29 (clean retry)
-// remount #30 (injection extracted)
-// remount #31 (cwd probe)
-// remount #32 (throttled cwd probe)
-// remount #33 (file channel retired)
-// remount #34 (per-property cwd probe)
-// remount #35 (called probe)
-// remount #36 (fix contextChannelProven)
-// remount #37
+// remount #39 (roll forward to fbb33f1)
