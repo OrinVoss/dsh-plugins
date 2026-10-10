@@ -4,9 +4,9 @@
 [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-7c3aed.svg)](https://github.com/topics/dsh-plugin)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2%2B-4f46e5.svg)](https://github.com/topics/dsh-plugin)
 
-八个跑在 [DeepSeek Harness](https://github.com/topics/dsh-plugin)（DSH）桌面端里的**社区插件包**：
-长期记忆、桌面宠物、GUI 皮肤、Token 用量报表、系统状态、旁支提问，以及给官方 Agent Teams
-补上「让 teammates 散伙」的 fork。
+九个跑在 [DeepSeek Harness](https://github.com/topics/dsh-plugin)（DSH）桌面端里的**社区插件包**：
+长期记忆、桌面宠物、GUI 皮肤、Token 用量报表、系统状态、旁支提问、消息撤回/编辑，以及给官方
+Agent Teams 补上「让 teammates 散伙」的 fork。
 
 全是真跑起来的插件——每个包都自带自检脚本，踩过的坑写进了各自的 README。
 下面每个插件都配了 **DSH 桌面端实机截图**（真机抓的，不是渲染稿）。
@@ -21,13 +21,14 @@
 
 | 插件 | 包名 / 版本 | 形态 | 一句话 |
 | --- | --- | --- | --- |
-| [**记忆**](memory/) | `dsh-memory` 0.3.1 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；**L0 速查/专题地图 + L1 按需检索**注入（2026-10-09 改版，测试中），设置页可浏览编辑 |
+| [**记忆**](memory/) | `dsh-memory` 0.3.1 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；全局索引注入 `AGENTS.md` 托管区块、**工作区索引注入工作区自己的 `AGENTS.local.md`**，设置页可浏览编辑 |
 | [**桌面宠物**](pet/) | `dsh-pet` 0.1.0 | 组合包 | 浮层里的一只小家伙：5 种宠物、7 种状态，随皮肤换色、随 Agent 干活换表情 |
 | [**皮肤**](skins/) | `dsh-skins` 1.0.0 | 普通包 | 叠加在浅/深主题上的 7 套配色层（青花瓷 / 东京夜 / 水墨 / 青绿山水 / 卡布奇诺 / 中国风 / 莫兰迪），字体一起换 |
 | [**系统状态**](sysmon/) | `dsh-sysmon` 1.0.0 | 普通包 | 侧栏底部一排圆环：CPU / 内存 / 磁盘 IO / 双显卡（窄侧栏收敛成单个 CPU 环） |
 | [**Token 统计**](token-stats/) | `dsh-token-stats` 0.1.0 | 普通包 | 解析会话日志 `usage`：活跃度热力图 + 每日趋势 + 模型用量环形图 |
 | [**样式扩展**](style-extras/) | `dsh-style-extras` 1.0.0 | 组合包 | 把上面三个（皮肤 / 系统状态 / Token 统计）收进一张卡片统一启停 |
 | [**临时提问**](btw/) | `dsh-btw` 0.1.0 | 组合包 | 右侧栏「开始」页的 `/btw` 卡片：答案不进历史、没有工具、退出即消失 |
+| [**消息撤回 / 编辑**](message-edit/) | `dsh-message-edit` 0.1.0 | 组合包 | 已发送的用户消息可以**撤回**和**编辑**：原生操作行加两个图标钮，编辑态在原气泡位置无缝覆盖 |
 | [**Agent Teams Plus**](agent-team-plus/) | `@local/dsh-agent-team-plus` 0.2.0-rc.2.1 | 组合包 | 官方 Agent Teams 的 fork：成员上限 8 → 16，新增 `release_teammate`（成员散伙腾坑、可再雇新） |
 
 > 「组合包」= 自带 `dsh.bundle.patch`，在侧栏「插件」页里有独立卡片；「普通包」= 只有加载行，
@@ -60,8 +61,8 @@ plugin_manager → install_bundle → target: "C:\Users\<你>\.dsh\plugins-git\m
 ```
 
 `install_bundle` 会**自动写好** profile 的两处声明：`dependencies` 里的 `link:` 与
-`dsh.profile.bundles` 里的包名。组合包（memory / pet / style-extras / btw / agent-team-plus）
-装完即出现在「插件」页。
+`dsh.profile.bundles` 里的包名。组合包（memory / pet / style-extras / btw / message-edit /
+agent-team-plus）装完即出现在「插件」页。
 
 ⚠️ 装 `style-extras` 时**三个成员包也要 link 进 profile**（它的 patch 只声明加载行，
 不提供包本体）：
@@ -126,23 +127,20 @@ cd <包目录>; npm test          # 有 test 脚本的包
 `memory_write` / `memory_search` / `memory_read` / `memory_forget` 四个工具。设置 → 记忆 里可浏览 /
 编辑 / 删除，带健康度卡片；落盘即 `git commit`（只本地、从不 push）。
 
-**注入走三条插件自有通道**（2026-10-09 改版，**测试中**）：
+**注入分两个层级**，都走 DSH 自己的指令文件机制（`dsh-agent-instructions` 会加载它们）：
 
-| 通道 | 挂在哪 | 干什么 |
+| 层级 | 写进哪 | 内容 |
 | --- | --- | --- |
-| **L0 全局索引** | `ctx.systemPrompt.section()` | 规则速查 + 专题地图，约 **3.7 KB**（改版前是 91 条逐条摘要 24.8 KB）；进系统提示词，也不会被压缩遮蔽 |
-| **工作区索引** | `ctx.systemPrompt.context()` | 按会话 cwd 现算的 runtime context，预算独立，**不往用户的仓库里写文件** |
-| **L1 按需检索** | `ctx.on('agent/pre-step')` | 每个**用户轮次**用本轮消息检索一遍，只把命中的几条追加进来；只追加 / 内容确定 / 同条目不重复，压缩后清账重投 |
+| **全局索引** | `~/.dsh/AGENTS.md` 的托管区块（`<!-- dsh-memory:begin/end -->`） | 全部条目的**逐条摘要**（预算 `maxBlockBytes`，默认 32 KB）；所有工作区共用 |
+| **工作区索引** | 会话工作区自己的 **`AGENTS.local.md`** 托管区块（`injectProjectBlock`） | 只放**本工作区**的项目条目，预算独立（`maxProjectBlockBytes`，默认 8 KB）；默认文件不进版本控制，想进仓库就把 `projectBlockFile` 改成 `AGENTS.md` |
 
-外加 **`compactionGuard` 压缩保护**：压缩把旧消息 shadow 掉时，把确实被遮掉的记忆检索条目补送回来。
+工作区区块有三条安全约定：只动托管区块、区块外一个字不改；本工作区没有项目条目**且**文件里没有
+托管区块时什么都不做（不在你的仓库里凭空建文件）；条目删空后摘掉区块，文件因此变空就删掉文件。
 
-这么改的关键收益是**插件一关、注入跟着消失**——以前写进 `AGENTS.md` 的托管区块做不到这一点
-（插件没了、区块还在注入，里面写的 `memory_search` 已不存在）。**文件区块通道已退休**
-（`promptInjection.enabled: false` 可整体回滚），`retrieve.enabled: false` / `blockMode: full`
-可分别关掉 L1 / L0。
+> 2026-10-09 曾试过把这套注入换成三条「随插件销毁」的扩展点（专题地图 + 按需检索 + 压缩保护），
+> 实测**专题地图会丢信息**，已整体回退到上面的文件区块方案，相关代码不再保留。
 
-细节与坑（`source` 缺了会整轮崩、去重的主触发器是压缩而不是步数、`overwrite` 漏传 `section`
-造成索引重复登记等）见 [memory/README.md](memory/README.md)。
+细节与坑（`overwrite` 漏传 `section` 造成索引重复登记等）见 [memory/README.md](memory/README.md)。
 
 **实机截图**（DSH 桌面端，下同）：设置 → 记忆 的管理页，以及插件页里的记忆卡片。
 
@@ -237,6 +235,31 @@ cd <包目录>; npm test          # 有 test 脚本的包
 | --- |
 | 插件页卡片：`dsh-btw` v0.1.0 |
 
+### 消息撤回 / 编辑 `dsh-message-edit`
+
+给**已发送的用户消息**补上「撤回」和「编辑」。DSH 里排队中的消息能改能删，但一旦变成会话日志里的
+`user/message` 就回不去了——用户气泡上只有复制和时间。这个插件在**原生操作行**里加了两个图标钮
+（就是官方 `MessageIconActions` 的 `extraActions` 位置）：
+
+- **撤回**：这条消息**及其之后**的对话从模型上下文里移除，界面上那一段也隐藏（之后的回答都是在回答它，
+  所以是「从这条起回退」，不是只删一条）。
+- **编辑**：同样移除，然后把你改后的文本作为一条**全新的**用户消息发出去——模型看到的是「改后的文本 +
+  新回答」，界面上是一条气泡一个回答。
+
+实现上**不改 DSH 本体**：宿主半边用 surface replace 事件原地改写模型上下文（`host.js`），客户端半边在
+`user` 渲染器上加按钮、并按轮次隐藏被遮蔽的行（`client.js`）。原始会话日志是 append-only，**不删任何事件**，
+变的只是「派生出来的模型历史」与「当前视图」。
+
+细节上比较讲究的一处是编辑态：官方消息本体照常渲染（所以图片 / 附件 / 引用摘要一个都不丢），编辑器按
+**实测**的原气泡盒子原位覆盖，字号、行高、内边距逐项对齐，所以文字在编辑前后**一个像素都不动**；
+进出场各一段 150–160ms 的关键帧（蓝底→白底+蓝环、再反向收回），刻意不做透明度和缩放，避免文字发虚或位移。
+
+限制：**会话空闲时才能操作**（当前轮次还在跑会被拒绝）；只能对当前表面上的追加型用户消息操作，
+动不了系统提示词。
+
+自检 57 项（`node selfcheck.cjs`）；原理、真机踩过的四个硬坑与 HTTP 接口见
+[message-edit/README.md](message-edit/README.md)。
+
 ### Agent Teams Plus `@local/dsh-agent-team-plus`
 
 官方 `@deepseek-ai/dsh-experimental-agent-team-profile@0.2.0-rc.2` 的 fork，两处改动：
@@ -274,6 +297,7 @@ dsh-plugins/
 ├── token-stats/         dsh-token-stats    普通包：Token 用量报表
 ├── btw/                 dsh-btw            组合包：/btw 旁支提问卡片
 ├── style-extras/        dsh-style-extras   组合包：把 skins/sysmon/token-stats 收成一张卡片
+├── message-edit/        dsh-message-edit   组合包：撤回 / 编辑已发送的用户消息
 ├── agent-team-plus/     官方 Agent Teams 的 fork（上限 16 + release_teammate）
 ├── tools/               不属于任何插件包的本机维护脚本
 ├── docs/                README 用的截图
@@ -316,7 +340,7 @@ dsh-plugins/
 ## English
 
 **dsh-plugins** is a collection of community plugins for **DeepSeek Harness (DSH)**, a
-desktop AI-agent workbench. Eight self-contained packages, each with its own README,
+desktop AI-agent workbench. Nine self-contained packages, each with its own README,
 self-check scripts and hard-won gotchas:
 
 `dsh-memory` (cross-session Markdown long-term memory + four tools) ·
@@ -326,6 +350,7 @@ self-check scripts and hard-won gotchas:
 `dsh-token-stats` (token usage heatmap / trend / model donut) ·
 `dsh-style-extras` (bundle card for skins + sysmon + token-stats) ·
 `dsh-btw` (side-question card; answers never enter the transcript, no tools) ·
+`dsh-message-edit` (retract / edit already-sent user messages; in-place native editor) ·
 `dsh-agent-team-plus` (fork of the official Agent Teams with a member cap of 16 and a
 `release_teammate` tool).
 
