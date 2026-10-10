@@ -10,22 +10,34 @@
  *  会话日志是 append-only 的，模型历史由「表面投影」得出；表面事件带
  *  `surfaceOp`，取值 `'append'` 或 `{ op:'replace', startSeq, endSeq }`。
  *  压缩（compaction）就是用 replace 遮蔽一段范围。本插件同样追加一条
- *  replace 事件，把 [目标 … 末尾] 换成**一条 content 为空的 system/message**：
- *    - `deriveEventMessage()` 对空 content 的 system/developer/assistant 返回 null
- *      → 模型完全看不到（user/message 即使空 content 也会投影成消息，所以不能用）；
- *    - assistant/message 禁止携带 sourceEventSeqs，而替换事件必须带 → 不能用；
- *    - developer/message 会被客户端渲染成"注入上下文"一行 → 不干净；
- *    - 空的 system/message 在客户端只被 system-message 定义"认领"但 `buildViewNode`
- *      返回 null（非 append），因此界面天然不显示它；
- *    - 只要不覆盖表面节点 0（系统提示词），就不触发头部保护。
+ *  replace 事件，把 [目标 … 末尾] 换成一个遮蔽节点。
+ *
+ * 遮蔽节点为什么必须是 `user/message`（2026-10-10 修正，旧版是致命 bug）：
+ *    - format v4 的 STEP_EVENT_TYPES = {system/message, developer/message,
+ *      assistant/attempt}，这三类事件的 `data.turn/step` **必须等于当前打开的
+ *      turn+step**（dsh-session-format-v3-to-v4 的 Relationships.requireStep）。
+ *      撤回/编辑发生在**空闲**（两轮之间）时没有任何打开的 step，所以旧版
+ *      「空 content 的 system/message」写进日志后，**整条会话下次加载必被判为
+ *      corrupt**（system/message does not match an open turn and step）。
+ *    - assistant/message、tool/result 同样要求打开的 step，且 assistant/message
+ *      禁止携带 sourceEventSeqs；developer/message 会被渲染成"注入上下文"。
+ *    - user/message 是唯一的**非 step 表面类型**：任何位置都能携带
+ *      surfaceOp:replace + sourceEventSeqs（DSH 自己的压缩就是用它当替换节点：
+ *      `user/message` + source.kind = 'compact-checkpoint'）。
+ *    - 代价是 `deriveEventMessage()` 对 user/message 一律返回消息本身，所以遮蔽
+ *      节点会被模型看到一行占位文本（见 RECALL_TEXT）。这是"合法且可加载"与
+ *      "模型完全看不到"之间的取舍——DSH 没有给插件留"自定义隐藏事件"的口子：
+ *      新事件类型会被 validateStoredEvents 以 unknown event type 拒绝，只有内核
+ *      名单里的 image/offload 能挂 message projection。
  *
  *  注意：客户端的对话记录是**原始日志视图**，替换事件本身不会让旧气泡消失
  *  （压缩也一样，只影响模型上下文）。所以界面侧的隐藏由客户端半边负责：
  *  本文件在 state 路由里返回「被遮蔽的轮次」，客户端据此隐藏那些轮次的行。
  *
- * 标记自己的替换事件：把空 system/message 的 `message.id` 写成 `dsh-recall:<uuid>`。
- *  每个校验器只要求 message.id 是非空字符串（见 dsh-session 的
- *  assertMessageEventShape），因此这是合法的、且可稳定识别的标记，不需要额外状态。
+ * 标记自己的替换事件：`message.id` 写成 `dsh-recall:<uuid>`、`source.kind` 写成
+ *  `message-edit`（两个都是格式允许的取值），用于稳定识别，不需要额外状态。
+ *  兼容旧日志里 content 为空的 `system/message` 遮蔽事件（那批已由
+ *  `_sessdiag/repair_logs.py` 挪到打开的 step 里修好，这里只负责仍能识别它们）。
  *
  * 对外 HTTP 路由（与 btw / sysmon 同一套 webServer 约定）：
  *   GET  /message-edit-api/state?sessionId=      → 会话状态：是否在跑、可编辑的尾部消息、已遮蔽的轮次
@@ -38,11 +50,61 @@ const { randomUUID } = require('node:crypto')
 
 const NAME = 'dsh-message-edit'
 
-/** 空 system/message 替换事件的 message.id 前缀：用来把自己的事件和别的事件区分开。 */
+/** 遮蔽事件的 message.id 前缀 + source.kind：用来把自己的事件和别的事件区分开。 */
 const MARK = 'dsh-recall:'
+const RECALL_SOURCE = 'message-edit'
+
+/** 遮蔽节点对模型可见的占位文本（user/message 一定会投影成消息）。 */
+const RECALL_TEXT = {
+  retract: '（用户撤回了一段对话，其中内容已不再可见，请不要再引用它。）',
+  edit: '（用户撤回并改写了下面这条消息。）',
+}
 
 /** 单次替换允许遮蔽的最大表面节点数（防御性上限）。 */
 const MAX_SHADOW_NODES = 4000
+
+/** 自检报告里的检查版本号：宿主热更后从这里确认新代码真的在跑。 */
+const CHECKS_VERSION = 2
+
+/**
+ * `sourceEventSeqs` 是区间编码（seq 或 [start,end]），摊平后才能查轮次。
+ * @param value - 事件上的 sourceEventSeqs。
+ * @returns 升序去重的 seq 数组。
+ */
+function expandEventSeqs(value) {
+  const out = []
+  for (const item of Array.isArray(value) ? value : []) {
+    if (Array.isArray(item) && item.length === 2 && Number.isSafeInteger(item[0]) && Number.isSafeInteger(item[1])) {
+      for (let seq = item[0]; seq <= item[1]; seq += 1) out.push(seq)
+    } else if (Number.isSafeInteger(item)) out.push(item)
+  }
+  return [...new Set(out)].sort((a, b) => a - b)
+}
+
+/**
+ * 日志自检：step 作用域事件（system/message、developer/message、assistant/attempt）
+ * 的 turn/step 必须等于当时打开的 turn+step。旧版把遮蔽事件写成空闲处的
+ * system/message，破坏的正是这条不变量，导致会话下次加载被判 corrupt。
+ * @param events - 会话事件。
+ * @returns 违规描述数组（空 = 合法）。
+ */
+function stepScopeViolations(events) {
+  const stepTypes = new Set(['system/message', 'developer/message', 'assistant/attempt'])
+  const problems = []
+  let turn = null
+  let step = null
+  for (const event of events) {
+    const data = event.data !== null && typeof event.data === 'object' ? event.data : {}
+    if (event.type === 'turn/start') { turn = data.turn; step = null }
+    else if (event.type === 'turn/end') { turn = null; step = null }
+    else if (event.type === 'step/start') { step = data.step }
+    else if (event.type === 'step/end') { step = null }
+    if (stepTypes.has(event.type) && !(turn !== null && step !== null && data.turn === turn && data.step === step)) {
+      problems.push(`seq ${event.seq} ${event.type} turn=${data.turn} step=${data.step} vs open turn=${turn} step=${step}`)
+    }
+  }
+  return problems
+}
 
 // ----------------------------------------------------------------- 小工具
 
@@ -83,11 +145,18 @@ function readJson(req, limit = 1 << 20) {
   })
 }
 
-/** 一条事件是不是本插件写下的遮蔽替换。 */
+/** 一条事件是不是本插件写下的遮蔽替换（新形态 user/message + 旧形态 system/message 都认）。 */
 function isRecallCut(event) {
-  if (event.type !== 'system/message') return false
   const op = event.surfaceOp
   if (op === undefined || op === 'append') return false
+  if (event.type === 'user/message') {
+    const data = event.data
+    return data !== null && typeof data === 'object'
+      && typeof data.id === 'string' && data.id.startsWith(MARK)
+      && data.source !== null && typeof data.source === 'object' && data.source.kind === RECALL_SOURCE
+  }
+  // 旧形态：content 为空的 system/message（已由 _sessdiag/repair_logs.py 挪进打开的 step）
+  if (event.type !== 'system/message') return false
   const id = event.data && event.data.message && event.data.message.id
   return typeof id === 'string' && id.startsWith(MARK)
 }
@@ -167,7 +236,7 @@ module.exports = {
       for (const event of events) {
         if (!isRecallCut(event)) continue
         const op = event.surfaceOp
-        const shadowed = Array.isArray(event.sourceEventSeqs) ? event.sourceEventSeqs : []
+        const shadowed = expandEventSeqs(event.sourceEventSeqs)
         const opTurns = hiddenTurnsOf(shadowed, turns)
         for (const turn of opTurns) hidden.add(turn)
         ops.push({
@@ -238,21 +307,18 @@ module.exports = {
 
       const turns = seqTurns(events)
       const opTurns = hiddenTurnsOf(shadowed, turns)
-      const turn = turns.get(seq) ?? 0
-      const step = 1
 
-      // 用空 content 的 system/message 遮蔽整段：模型投影为 null，界面也不显示。
+      // 遮蔽节点必须是 user/message：只有它不是 step 作用域事件，才能在"空闲"
+      // （没有打开的 turn/step）时合法携带 surfaceOp:replace。写成 system/message
+      // 会让整条日志下次加载时报 "system/message does not match an open turn and step"。
+      // 代价：user/message 一定会投影成消息，所以遮蔽节点对模型显示为一行占位文本。
       const cut = session.append(
-        'system/message',
+        'user/message',
         {
-          turn,
-          step,
-          message: {
-            id: `${MARK}${randomUUID()}`,
-            role: 'system',
-            source: { kind: 'system-prompt' },
-            content: [],
-          },
+          id: `${MARK}${randomUUID()}`,
+          role: 'user',
+          source: { kind: RECALL_SOURCE, form: action },
+          content: [{ type: 'text', text: RECALL_TEXT[action] }],
         },
         { surfaceOp: { op: 'replace', startSeq: seq, endSeq }, sourceEventSeqs: shadowed },
       )
@@ -287,6 +353,10 @@ module.exports = {
         }
       }
 
+      // 写完之后再验一遍日志合法性：这是旧 bug 的回归闸，任何一步退回旧写法都会在这里爆出来。
+      const logProblems = stepScopeViolations(session.snapshotEvents())
+      if (logProblems.length > 0) ctx.logger?.warn?.(`[${NAME}] 遮蔽后日志不合法（session ${sessionId}）：${logProblems[0]}`)
+
       const result = {
         ok: true,
         action,
@@ -296,6 +366,7 @@ module.exports = {
         shadowed: shadowed.length,
         hiddenTurns: opTurns,
         prompted,
+        logProblems,
         ...(promptError === undefined ? {} : { promptError }),
       }
       recentOps.push({ time: Date.now(), sessionId, action, seq, ...(promptError === undefined ? {} : { promptError }) })
@@ -420,6 +491,8 @@ module.exports = {
     /**
      * 自检：在**临时会话**（prepare 出来的、不进 store）上验证
      * 「追加 → 替换 → deriveMessages」这条链路，不碰任何真实会话。
+     * 另含两条硬闸：① 写完遮蔽事件后日志必须仍通过 step 作用域校验；
+     * ② 反向构造旧版非法日志，检查器必须能抓到（否则旧 bug 会静默复活）。
      */
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
@@ -430,7 +503,7 @@ module.exports = {
         const step = (name, detail) => report.steps.push({ name, ...(detail === undefined ? {} : { detail }) })
         try {
           const session = ctx.sessions.prepare(undefined, { meta: { cwd: os.tmpdir() } })
-          step('prepare', { id: session.id })
+          step('prepare', { id: session.id, checks: CHECKS_VERSION })
           const now = Date.now()
           const mkUser = (id, text) => ({ id, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] })
           const mkAssistant = (id, text) => ({
@@ -439,13 +512,14 @@ module.exports = {
             message: { id, role: 'assistant', source: { kind: 'model', provider: 'test', model: 'test' }, content: [{ type: 'text', text }] },
             stream: [],
           })
+          // 顺序要和真实日志一致：系统提示词落在第一个打开的 step 里（否则 step 作用域校验不过）。
+          session.append('turn/start', { turn: 1 })
+          session.append('step/start', { turn: 1, step: 1 })
           session.append('system/message', {
             turn: 1,
             step: 1,
             message: { id: 'sys-1', role: 'system', source: { kind: 'system-prompt' }, content: [{ type: 'text', text: 'SYS' }] },
           }, { surfaceOp: 'append' })
-          session.append('turn/start', { turn: 1 })
-          session.append('step/start', { turn: 1, step: 1 })
           const u1 = session.append('user/message', mkUser('u-1', 'hello one'), { surfaceOp: 'append' })
           session.append('assistant/message', mkAssistant('a-1', 'answer one'), { surfaceOp: 'append' })
           session.append('step/end', { turn: 1, step: 1 })
@@ -461,16 +535,17 @@ module.exports = {
           const before = session.deriveMessages().map((m) => `${m.role}:${messageText(m) || '(empty)'}`)
           step('derive-before', before)
 
-          // 事件 12 是 u2。从 u2 起遮蔽到末尾。
+          // 从 u2 起遮蔽到末尾；此刻两轮都已结束（无打开的 step），正是旧版把日志写坏的位置。
           const nodes = [...session.surface.nodes]
           const startIdx = nodes.indexOf(u2.seq)
           const shadowed = nodes.slice(startIdx)
-          const cut = session.append('system/message', {
-            turn: 2,
-            step: 1,
-            message: { id: `${MARK}${randomUUID()}`, role: 'system', source: { kind: 'system-prompt' }, content: [] },
+          const cut = session.append('user/message', {
+            id: `${MARK}${randomUUID()}`,
+            role: 'user',
+            source: { kind: RECALL_SOURCE, form: 'retract' },
+            content: [{ type: 'text', text: RECALL_TEXT.retract }],
           }, { surfaceOp: { op: 'replace', startSeq: u2.seq, endSeq: nodes[nodes.length - 1] }, sourceEventSeqs: shadowed })
-          step('replace', { cutSeq: cut.seq, startSeq: u2.seq, shadowed })
+          step('replace', { cutSeq: cut.seq, startSeq: u2.seq, shadowed, type: cut.type })
 
           const after = session.deriveMessages().map((m) => `${m.role}:${messageText(m) || '(empty)'}`)
           step('derive-after', after)
@@ -483,11 +558,28 @@ module.exports = {
           if (!after.includes('assistant:answer one')) report.failures.push('替换后 a1 丢了')
           if (after.includes('user:hello two')) report.failures.push('替换后 u2 仍在模型历史里')
           if (after.includes('assistant:answer two')) report.failures.push('替换后 a2 仍在模型历史里')
-          if (after.some((line) => line.startsWith('system:(empty)'))) report.failures.push('空 system 节点泄漏到了模型历史')
+          if (!after.some((line) => line.includes(RECALL_TEXT.retract))) report.failures.push('遮蔽节点没有投影到模型历史（user/message 必然会投影）')
           if (afterSurface.includes(u2.seq)) report.failures.push('u2 仍在当前表面上')
           if (afterSurface[afterSurface.length - 1] !== cut.seq) report.failures.push('替换节点没有落在范围起点上')
 
-          // 再验一次：撤回第一条用户消息（含全部轮次）也只留系统提示词。
+          // 硬闸 ①：写完遮蔽事件后，日志必须仍然通过 step 作用域校验（旧 bug 的回归）。
+          const violations = stepScopeViolations(session.snapshotEvents())
+          step('log-legal', { violations })
+          if (violations.length > 0) report.failures.push(`遮蔽事件让日志不可加载：${violations[0]}`)
+
+          // 硬闸 ②：反向构造旧版那种"空闲时写 system/message"的日志，检查器必须能抓到。
+          const bad = ctx.sessions.prepare(undefined, { meta: { cwd: os.tmpdir() } })
+          bad.append('turn/start', { turn: 1 })
+          bad.append('step/start', { turn: 1, step: 1 })
+          bad.append('system/message', { turn: 1, step: 1, message: { id: 'sys-2', role: 'system', source: { kind: 'system-prompt' }, content: [{ type: 'text', text: 'S' }] } }, { surfaceOp: 'append' })
+          const badUser = bad.append('user/message', mkUser('u-9', 'x'), { surfaceOp: 'append' })
+          bad.append('step/end', { turn: 1, step: 1 })
+          bad.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+          bad.append('system/message', { turn: 1, step: 1, message: { id: `${MARK}bad`, role: 'system', source: { kind: 'system-prompt' }, content: [] } }, { surfaceOp: { op: 'replace', startSeq: badUser.seq, endSeq: badUser.seq }, sourceEventSeqs: [badUser.seq] })
+          const caught = stepScopeViolations(bad.snapshotEvents())
+          step('detector-catches-old-bug', { caught })
+          if (caught.length === 0) report.failures.push('检查器抓不到旧版那种非法日志，回归闸失效')
+
           report.ok = report.failures.length === 0
           report.ms = Date.now() - now
           sendJson(res, 200, report)
