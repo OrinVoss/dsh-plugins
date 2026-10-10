@@ -298,13 +298,37 @@ module.exports = {
 
     // ----------------------------------------------------------- 路由
 
+    /** 客户端上报的渲染错误（环形缓冲，方便真机排查）。 */
+    const clientErrors = []
+
+    ctx.effect(() => ctx.webServer.register({
+      kind: 'exact',
+      path: '/message-edit-api/client-error',
+      handler: (req, res) => {
+        if (req.method !== 'POST') return fail(res, 405, 'POST only')
+        readJson(req).then((body) => {
+          const entry = {
+            time: Date.now(),
+            where: typeof body.where === 'string' ? body.where : '?',
+            message: typeof body.message === 'string' ? body.message : '?',
+            stack: typeof body.stack === 'string' ? body.stack.slice(0, 2000) : undefined,
+          }
+          clientErrors.push(entry)
+          if (clientErrors.length > 30) clientErrors.shift()
+          ctx.logger?.warn?.(`[${NAME}] client error at ${entry.where}: ${entry.message}`)
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end('{"ok":true}')
+        }, (error) => fail(res, 400, error && error.message ? error.message : error))
+      },
+    }), 'dsh-message-edit: client-error route')
+
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
       path: '/message-edit-api/state',
       handler: (req, res) => {
         try {
           const url = new URL(req.url || '/', 'http://127.0.0.1')
-          sendJson(res, 200, sessionState(url.searchParams.get('sessionId') || ''))
+          sendJson(res, 200, { ...sessionState(url.searchParams.get('sessionId') || ''), clientErrors })
         } catch (error) {
           fail(res, 500, error && error.message ? error.message : error)
         }

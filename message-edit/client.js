@@ -149,14 +149,54 @@ window.__ModuleLoader__.load({
 
     /** 订阅共享状态；返回 (sessionId, node) => 是否应隐藏。 */
     function useHidden() {
-      React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+      const [version, bump] = React.useState(0)
+      React.useEffect(() => {
+        const unsubscribe = subscribe(() => bump((value) => value + 1))
+        return () => { unsubscribe() }
+      }, [])
       return React.useCallback((sessionId, node) => {
         const turns = hiddenBySession.get(sessionId)
         if (turns === undefined || turns.length === 0) return false
         const location = node === undefined ? undefined : node.location
         const turn = location !== undefined && (location.kind === 'turn' || location.kind === 'step') ? location.turn.turn : undefined
         return typeof turn === 'number' && turns.includes(turn)
-      }, [snapshot])
+      }, [version])
+    }
+
+    /** 把渲染期错误报给宿主，真机上才有得查。 */
+    function reportError(where, error) {
+      try {
+        fetch(`${API}/client-error`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            where,
+            message: error !== null && error !== undefined && error.message !== undefined ? String(error.message) : String(error),
+            stack: error !== null && error !== undefined && error.stack !== undefined ? String(error.stack) : undefined,
+          }),
+        }).catch(() => {})
+      } catch {}
+      console.error(`[${ID}] ${where}`, error)
+    }
+
+    /** 兜底错误边界：官方组件在我们转发 props 后若抛错，至少把原因报出来。 */
+    class ShadowBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { failed: false }
+      }
+
+      static getDerivedStateFromError() {
+        return { failed: true }
+      }
+
+      componentDidCatch(error) {
+        reportError(`boundary:${this.props.label}`, error)
+      }
+
+      render() {
+        return this.state.failed ? null : this.props.children
+      }
     }
 
     // ------------------------------------------------------------------ 通知条
@@ -203,7 +243,11 @@ window.__ModuleLoader__.load({
           if (typeof sessionId === 'string' && sessionId !== '') fetchState(sessionId)
         }, [sessionId])
 
-        if (isHidden(sessionId, node)) return null
+        try {
+          if (isHidden(sessionId, node)) return null
+        } catch (error) {
+          reportError('user:hidden', error)
+        }
 
         const run = async (action, text) => {
           if (busy) return
@@ -272,7 +316,9 @@ window.__ModuleLoader__.load({
         }
 
         return React.createElement('div', { className: 'me-root' },
-          Original === undefined ? null : React.createElement(Original, props),
+          Original === undefined
+            ? null
+            : React.createElement(ShadowBoundary, { label: 'user' }, React.createElement(Original, props)),
           React.createElement('div', { className: 'me-actions' },
             React.createElement('button', {
               type: 'button', className: 'me-btn', disabled: busy, title: COPY.edit,
@@ -291,9 +337,19 @@ window.__ModuleLoader__.load({
     function makeHider(kind, resolveOriginal) {
       return function HiddenNode(props) {
         const isHidden = useHidden()
-        if (isHidden(props.sessionId, props.node)) return null
-        const Original = resolveOriginal(kind)
-        return Original === undefined ? null : React.createElement(Original, props)
+        try {
+          if (isHidden(props.sessionId, props.node)) return null
+          const Original = resolveOriginal(kind)
+          if (Original === undefined) {
+            reportError(`hider:${kind}`, new Error('resolveOriginal 返回 undefined，官方渲染器没找到'))
+            return null
+          }
+          return React.createElement(ShadowBoundary, { label: kind },
+            React.createElement(Original, props))
+        } catch (error) {
+          reportError(`hider:${kind}`, error)
+          return null
+        }
       }
     }
 
@@ -355,6 +411,16 @@ window.__ModuleLoader__.load({
       })
 
       console.log(`[${ID}] client ready; captured kinds =`, [...captured.keys()].join(','))
+      try {
+        fetch(`${API}/client-error`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            where: 'ready',
+            message: `entries=${typeof ctx.slots.entries} entriesOfSlot=${typeof ctx.slots.entriesOfSlot} captured=${[...captured.keys()].length} resolvedUser=${resolveOriginal('user') === undefined ? 'none' : 'ok'}`,
+          }),
+        }).catch(() => {})
+      } catch {}
     }
 
     exports.apply = apply
