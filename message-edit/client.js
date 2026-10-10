@@ -42,6 +42,8 @@ window.__ModuleLoader__.load({
     const SLOT = 'conversation.chat.node'
     const HIDDEN_ATTR = 'data-msg-edit-hidden'
     const ROW_SELECTOR = '[data-chat-flow-key]'
+    /** 退出编辑的动画时长；必须与 CSS 里 `me-edit-morph-out` 的时长一致。 */
+    const CLOSE_MS = 150
 
     const CN = !/^en/i.test((typeof navigator !== 'undefined' && navigator.language) || '')
     const COPY = {
@@ -102,7 +104,15 @@ window.__ModuleLoader__.load({
   100%{background:var(--dsw-alias-bg-base,#fff);border-color:var(--dsw-alias-state-business-primary,#4d6bfe)}
 }
 @keyframes me-edit-fade{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+/* 退出编辑：反向把白底 + 蓝描线变回气泡蓝、描线消失；播完才卸载编辑器，所以不会"啪"地跳回去 */
+@keyframes me-edit-morph-out{
+  0%{background:var(--dsw-alias-bg-base,#fff);border-color:var(--dsw-alias-state-business-primary,#4d6bfe)}
+  100%{background:var(--dsw-specific-bubble);border-color:transparent}
+}
 .me-editor{animation:me-edit-morph 160ms cubic-bezier(.2,.7,.3,1) both}
+.me-editor[data-closing="1"]{animation:me-edit-morph-out 150ms cubic-bezier(.4,0,.6,1) both;pointer-events:none}
+.me-editor[data-closing="1"] .me-editor-actions{opacity:0;transition:opacity 80ms ease}
+.me-editor[data-closing="1"] .me-editor-input{caret-color:transparent}
 .me-editor-actions{animation:me-edit-fade 140ms ease 70ms backwards}
 /*
  * 退出编辑时操作行消失又出现：让它在切回来时也淡入一下。
@@ -111,7 +121,7 @@ window.__ModuleLoader__.load({
  */
 .me-actions{animation:me-edit-fade 140ms ease backwards}
 @media (prefers-reduced-motion:reduce){
-  .me-editor,.me-editor-actions,.me-actions{animation:none}
+  .me-editor,.me-editor[data-closing="1"],.me-editor-actions,.me-actions{animation:none}
 }
 /*
  * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
@@ -347,6 +357,7 @@ window.__ModuleLoader__.load({
         const [editing, setEditing] = React.useState(false)
         const [draft, setDraft] = React.useState('')
         const [busy, setBusy] = React.useState(false)
+        const [closing, setClosing] = React.useState(false)
         const [editBox, setEditBox] = React.useState(null)
         const originalText = React.useMemo(() => textOf(data), [data])
         const inputRef = React.useRef(null)
@@ -423,7 +434,7 @@ window.__ModuleLoader__.load({
               return
             }
             setHidden(sessionId, [...(hiddenBySession.get(sessionId) ?? []), ...(payload.hiddenTurns ?? [])])
-            setEditing(false)
+            closeEditor()
             if (payload.promptError !== undefined) toast(COPY.failed + payload.promptError, 'error')
             else toast(COPY.done(action))
             fetchState(sessionId, true)
@@ -483,8 +494,27 @@ window.__ModuleLoader__.load({
         const beginEdit = React.useCallback(() => {
           setEditBox(measureBubbleBox())
           setDraft(originalText)
+          setClosing(false)
           setEditing(true)
         }, [measureBubbleBox, originalText])
+
+        /**
+         * 退出编辑：先把 `closing` 置上，让编辑器播完反向动画（白底+蓝环 → 气泡蓝）
+         * 再真正卸载。150ms 是不丢帧的下限（动画本身也是 150ms）。
+         */
+        const closeTimer = React.useRef(null)
+        React.useEffect(() => () => {
+          if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+        }, [])
+        const closeEditor = React.useCallback(() => {
+          if (closeTimer.current !== null) return
+          setClosing(true)
+          closeTimer.current = window.setTimeout(() => {
+            closeTimer.current = null
+            setClosing(false)
+            setEditing(false)
+          }, CLOSE_MS)
+        }, [])
 
         if (editing) {
           // **无缝**：官方消息本体照常渲染（所以上面的图片/附件/引用摘要一个都不丢），
@@ -503,7 +533,11 @@ window.__ModuleLoader__.load({
               }
           return React.createElement('div', { className: 'me-root', ref: rootRef, 'data-editing': '1' },
             Original === undefined ? null : React.createElement(Original, props),
-            React.createElement('div', { className: 'me-editor', style: boxStyle },
+            React.createElement('div', {
+              className: 'me-editor',
+              style: boxStyle,
+              ...(closing ? { 'data-closing': '1' } : {}),
+            },
               React.createElement('textarea', {
                 ref: inputRef,
                 className: 'me-editor-input',
@@ -514,9 +548,10 @@ window.__ModuleLoader__.load({
                 placeholder: COPY.editing,
                 onChange: (event) => setDraft(event.target.value),
                 onKeyDown: (event) => {
+                  if (closing) return
                   if (event.key === 'Escape') {
                     event.preventDefault()
-                    setEditing(false)
+                    closeEditor()
                     return
                   }
                   if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -527,7 +562,7 @@ window.__ModuleLoader__.load({
               }),
               React.createElement('div', { className: 'me-editor-actions' },
                 React.createElement('button', {
-                  type: 'button', className: 'me-icon', disabled: busy || draft.trim() === '',
+                  type: 'button', className: 'me-icon', disabled: busy || closing || draft.trim() === '',
                   'aria-label': COPY.save, title: COPY.save,
                   onClick: () => {
                     if (draft.trim() === '') { toast(COPY.empty, 'error'); return }
@@ -535,9 +570,9 @@ window.__ModuleLoader__.load({
                   },
                 }, React.createElement(IconCheck, {})),
                 React.createElement('button', {
-                  type: 'button', className: 'me-icon', disabled: busy,
+                  type: 'button', className: 'me-icon', disabled: busy || closing,
                   'aria-label': COPY.cancel, title: COPY.cancel,
-                  onClick: () => setEditing(false),
+                  onClick: closeEditor,
                 }, React.createElement(IconClose, {})),
               ),
             ),
