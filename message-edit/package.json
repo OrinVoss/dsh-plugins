@@ -24,7 +24,11 @@
     "host.js",
     "client.js",
     "cordis.patch.yml",
+    "selfcheck.cjs",
     "selftest.cjs",
     "README.md"
-  ]
+  ],
+  "scripts": {
+    "test": "node selfcheck.cjs"
+  }
 }
