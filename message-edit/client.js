@@ -3,15 +3,25 @@
  *
  * 做两件事：
  *  1. **加按钮**：遮蔽官方 `conversation.chat.node` 的 `user` 渲染器（priority -1），
- *     在外面套一层 `<Orig {...props} />` + 编辑/撤回按钮。
+ *     外面套一层 `<Orig {...props} />` + 编辑/撤回按钮。
  *     依据：slot 的 catalog 明说 "Registering an already-occupied key replaces that
  *     occupant"，slot core 的规则是**同 key 不同 priority 共存、priority 最小者渲染**
  *     （官方是 0），所以 -1 即遮蔽；渲染器把合并好的 props 当**一个对象**传给组件，
  *     因此 `{...props}` 原样转发就能做到外观零妥协。
+ *
+ *     ⚠️ 关键坑（真机实测得出）：遮蔽条必须**复制官方条目的 `locale` 与 `inject`**。
+ *     `kit.t` 只在条目声明了 `locale` 时才注入，`inject` 提供的 props（如 `useHostInfo`）
+ *     同理；不复制就会让官方组件在渲染时抛 `t is not a function` /
+ *     `useHostInfo is not a function`，条目被 slot 让位（abdicated），按钮也就不出现。
+ *
  *  2. **隐藏被遮蔽的轮次**：客户端的对话记录是**原始日志视图**——表面替换（压缩也一样）
- *     只改变模型上下文，不会让旧气泡消失。所以本插件 wrap 每一个 chat node 渲染器，
- *     当 `node.location.turn.turn ∈ hiddenTurns` 时渲染 null（干净的 React 卸载，不动 DOM）。
- *     hiddenTurns 由宿主半边从会话日志里算出（见 host.js 的 state 路由）。
+ *     只改变模型上下文，不会让旧气泡消失。本插件按"被遮蔽的轮次"隐藏对应的行。
+ *
+ *     这里不用"wrap 每个 chat node 渲染器"的做法：官方有几种节点（`tool-call`、`turn-tail`、
+ *     `command`）自己声明了 children slot，而同一个 child slot 不能声明两次；不声明就拿不到
+ *     官方 kit 里的 `renderSlot`，转发 props 后官方组件会崩。所以改为：按行上的
+ *     `data-chat-turn` 做一次作用域内的显示过滤（被遮蔽的轮次是一个**后缀块**，
+ *     因此可以取"第一个到最后一个命中行"的连续区间，天然覆盖区间内没有 turn 属性的行）。
  *
  * 与宿主半边的通道：GET/POST /message-edit-api/*（与 btw / sysmon 同一套 webServer 约定）。
  * 客户端插件只能 require 真正的 __ModuleLoader__ 模块（react），不能 require app 内部 ESM 库，
@@ -30,16 +40,10 @@ window.__ModuleLoader__.load({
     const ID = 'dsh-message-edit'
     const API = '/message-edit-api'
     const SLOT = 'conversation.chat.node'
+    const HIDDEN_ATTR = 'data-msg-edit-hidden'
+    const ROW_SELECTOR = '[data-chat-flow-key]'
 
-    /** 需要 wrap 的 chat node 种类：被遮蔽轮次里的任何一行都要能隐藏。 */
-    const WRAP_KINDS = [
-      'user', 'steering', 'context', 'turn-trigger', 'assistant-step', 'tool-call',
-      'turn-process', 'turn-tail', 'turn-error', 'turn-max-tokens', 'model-retry',
-      'compaction', 'manual-compaction', 'command', 'command-input', 'question-reply',
-      'workflow-run', 'system-prompt', 'unknown',
-    ]
-
-    const CN = /^zh/i.test((typeof navigator !== 'undefined' && navigator.language) || '') || (typeof navigator !== 'undefined' && navigator.language === undefined)
+    const CN = !/^en/i.test((typeof navigator !== 'undefined' && navigator.language) || '')
     const COPY = {
       edit: CN ? '编辑' : 'Edit',
       retract: CN ? '撤回' : 'Recall',
@@ -58,6 +62,7 @@ window.__ModuleLoader__.load({
     // ------------------------------------------------------------------ 样式
 
     const CSS = `
+[${HIDDEN_ATTR}]{display:none!important}
 .me-root{display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:100%;min-width:0}
 .me-actions{display:flex;align-items:center;gap:2px;justify-content:flex-end;min-height:22px;opacity:.55;transition:opacity .12s ease}
 .me-root:hover .me-actions{opacity:1}
@@ -109,20 +114,16 @@ window.__ModuleLoader__.load({
     const loaded = new Set()
     const inflight = new Set()
     const listeners = new Set()
-    let snapshot = 0
+    let version = 0
 
     function notify() {
-      snapshot += 1
-      for (const listener of listeners) listener()
+      version += 1
+      for (const listener of listeners) listener(version)
     }
 
     function subscribe(listener) {
       listeners.add(listener)
-      return () => listeners.delete(listener)
-    }
-
-    function getSnapshot() {
-      return snapshot
+      return () => { listeners.delete(listener) }
     }
 
     function setHidden(sessionId, turns) {
@@ -147,68 +148,61 @@ window.__ModuleLoader__.load({
         .finally(() => { inflight.delete(sessionId) })
     }
 
-    /** 订阅共享状态；返回 (sessionId, node) => 是否应隐藏。 */
-    function useHidden() {
-      const [version, bump] = React.useState(0)
-      React.useEffect(() => {
-        const unsubscribe = subscribe(() => bump((value) => value + 1))
-        return () => { unsubscribe() }
-      }, [])
-      return React.useCallback((sessionId, node) => {
-        const turns = hiddenBySession.get(sessionId)
-        if (turns === undefined || turns.length === 0) return false
-        const location = node === undefined ? undefined : node.location
-        const turn = location !== undefined && (location.kind === 'turn' || location.kind === 'step') ? location.turn.turn : undefined
-        return typeof turn === 'number' && turns.includes(turn)
-      }, [version])
-    }
-
-    /** 把渲染期错误报给宿主，真机上才有得查。 */
-    function reportError(where, error) {
+    /** 把渲染期/请求期的错误报给宿主，真机上才有得查。 */
+    function report(where, error) {
+      const message = error !== null && error !== undefined && error.message !== undefined ? String(error.message) : String(error)
       try {
         fetch(`${API}/client-error`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             where,
-            message: error !== null && error !== undefined && error.message !== undefined ? String(error.message) : String(error),
+            message,
             stack: error !== null && error !== undefined && error.stack !== undefined ? String(error.stack) : undefined,
           }),
         }).catch(() => {})
       } catch {}
-      console.error(`[${ID}] ${where}`, error)
+      console.error(`[${ID}] ${where}: ${message}`)
     }
 
-    /** 兜底错误边界：官方组件在我们转发 props 后若抛错，至少把原因报出来。 */
-    class ShadowBoundary extends React.Component {
-      constructor(props) {
-        super(props)
-        this.state = { failed: false }
-      }
+    // ------------------------------------------------------------------ 行过滤
 
-      static getDerivedStateFromError() {
-        return { failed: true }
-      }
-
-      componentDidCatch(error) {
-        reportError(`boundary:${this.props.label}`, error)
-      }
-
-      render() {
-        return this.state.failed ? null : this.props.children
-      }
+    /**
+     * 在给定容器内隐藏"被遮蔽轮次"的行。
+     *
+     * 被遮蔽的轮次永远是一个后缀块（撤回从某条消息起、遮蔽到操作时的末尾），
+     * 所以这里取"第一个命中行 → 最后一个命中行"的连续区间：既覆盖区间内没有
+     * `data-chat-turn` 的行，也不会波及之后新建的行（新轮次号更大、排在区间之后）。
+     *
+     * @param container - 对话流容器（行元素的父节点）。
+     * @param turns - 被遮蔽的轮次号数组。
+     */
+    function applyHiddenRows(container, turns) {
+      if (container === null || container === undefined) return
+      const rows = [...container.querySelectorAll(ROW_SELECTOR)]
+      const set = new Set(Array.isArray(turns) ? turns : EMPTY)
+      // 前向填充：没有 data-chat-turn 的行沿用上一行的轮次。
+      let current = undefined
+      const flags = rows.map((row) => {
+        const raw = row.getAttribute('data-chat-turn')
+        const parsed = raw === null || raw === '' ? Number.NaN : Number(raw)
+        if (Number.isFinite(parsed)) current = parsed
+        return Number.isFinite(current) && set.has(current)
+      })
+      let first = -1
+      let last = -1
+      flags.forEach((flag, index) => {
+        if (!flag) return
+        if (first === -1) first = index
+        last = index
+      })
+      rows.forEach((row, index) => {
+        if (first !== -1 && index >= first && index <= last) row.setAttribute(HIDDEN_ATTR, '1')
+        else row.removeAttribute(HIDDEN_ATTR)
+      })
     }
 
-    // ------------------------------------------------------------------ 通知条
-
-    function toast(text, tone) {
-      const el = document.createElement('div')
-      el.className = 'me-toast'
-      el.textContent = text
-      if (tone === 'error') el.style.color = 'var(--dsw-alias-state-error-primary,#ff6b6b)'
-      document.body.appendChild(el)
-      window.setTimeout(() => { el.remove() }, tone === 'error' ? 4200 : 2000)
-    }
+    // ------------------------------------------------------------------ 组件
 
     function textOf(message) {
       const blocks = message !== null && typeof message === 'object' && Array.isArray(message.content) ? message.content : []
@@ -224,13 +218,22 @@ window.__ModuleLoader__.load({
       return location !== undefined && (location.kind === 'turn' || location.kind === 'step') ? location.turn.turn : undefined
     }
 
-    // ------------------------------------------------------------------ 组件
+    function toast(text, tone) {
+      const el = document.createElement('div')
+      el.className = 'me-toast'
+      el.textContent = text
+      if (tone === 'error') el.style.color = 'var(--dsw-alias-state-error-primary,#ff6b6b)'
+      document.body.appendChild(el)
+      window.setTimeout(() => { el.remove() }, tone === 'error' ? 4200 : 2000)
+    }
 
-    /** user 渲染器的遮蔽件：官方气泡 + 编辑 / 撤回按钮；编辑时换成内联编辑框。 */
+    /**
+     * user 渲染器的遮蔽件：官方气泡 + 编辑 / 撤回按钮；编辑时换成内联编辑框。
+     */
     function makeUserShadow(resolveOriginal) {
       return function UserNodeWithRecall(props) {
-        const isHidden = useHidden()
-        const Original = resolveOriginal('user')
+        const rootRef = React.useRef(null)
+        const [, setTick] = React.useState(0)
         const node = props.node
         const data = (node === undefined || node.data === undefined) ? {} : node.data
         const sessionId = props.sessionId
@@ -239,15 +242,48 @@ window.__ModuleLoader__.load({
         const [busy, setBusy] = React.useState(false)
         const originalText = React.useMemo(() => textOf(data), [data])
 
+        // 订阅被遮蔽轮次的变化。
+        React.useEffect(() => {
+          const unsubscribe = subscribe(() => setTick((value) => value + 1))
+          return () => { unsubscribe() }
+        }, [])
+
+        // 进入会话时拉一次状态。
         React.useEffect(() => {
           if (typeof sessionId === 'string' && sessionId !== '') fetchState(sessionId)
         }, [sessionId])
 
-        try {
-          if (isHidden(sessionId, node)) return null
-        } catch (error) {
-          reportError('user:hidden', error)
-        }
+        // 把行过滤同步到当前对话流容器，并在 DOM 变化后重放。
+        React.useEffect(() => {
+          const locate = () => {
+            const element = rootRef.current
+            if (element === null) return null
+            const row = element.closest(ROW_SELECTOR)
+            return row === null ? null : row.parentElement
+          }
+          let scheduled = false
+          let container = locate()
+          const sync = () => {
+            scheduled = false
+            container = locate() ?? container
+            const turns = hiddenBySession.get(sessionId)
+            if (turns === undefined || turns.length === 0) {
+              // 没有遮蔽时也要清掉本容器里的历史标记（会话切换 / 状态被重置）。
+              if (container !== null) for (const row of container.querySelectorAll(`[${HIDDEN_ATTR}]`)) row.removeAttribute(HIDDEN_ATTR)
+              return
+            }
+            applyHiddenRows(container, turns)
+          }
+          const schedule = () => {
+            if (scheduled) return
+            scheduled = true
+            window.requestAnimationFrame(sync)
+          }
+          sync()
+          const observer = new MutationObserver(schedule)
+          observer.observe(document.body, { childList: true, subtree: true })
+          return () => { observer.disconnect() }
+        }, [sessionId, version])
 
         const run = async (action, text) => {
           if (busy) return
@@ -281,8 +317,10 @@ window.__ModuleLoader__.load({
           }
         }
 
+        const Original = resolveOriginal('user')
+
         if (editing) {
-          return React.createElement('div', { className: 'me-root' },
+          return React.createElement('div', { className: 'me-root', ref: rootRef },
             React.createElement('div', { className: 'me-editor' },
               React.createElement('div', { className: 'me-editor-title' }, COPY.editing),
               React.createElement('textarea', {
@@ -315,10 +353,8 @@ window.__ModuleLoader__.load({
           )
         }
 
-        return React.createElement('div', { className: 'me-root' },
-          Original === undefined
-            ? null
-            : React.createElement(ShadowBoundary, { label: 'user' }, React.createElement(Original, props)),
+        return React.createElement('div', { className: 'me-root', ref: rootRef },
+          Original === undefined ? null : React.createElement(Original, props),
           React.createElement('div', { className: 'me-actions' },
             React.createElement('button', {
               type: 'button', className: 'me-btn', disabled: busy, title: COPY.edit,
@@ -333,26 +369,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** 其它种类的遮蔽件：被遮蔽的轮次里渲染 null，否则原样转发。 */
-    function makeHider(kind, resolveOriginal) {
-      return function HiddenNode(props) {
-        const isHidden = useHidden()
-        try {
-          if (isHidden(props.sessionId, props.node)) return null
-          const Original = resolveOriginal(kind)
-          if (Original === undefined) {
-            reportError(`hider:${kind}`, new Error('resolveOriginal 返回 undefined，官方渲染器没找到'))
-            return null
-          }
-          return React.createElement(ShadowBoundary, { label: kind },
-            React.createElement(Original, props))
-        } catch (error) {
-          reportError(`hider:${kind}`, error)
-          return null
-        }
-      }
-    }
-
     // ------------------------------------------------------------------ 插件
 
     function apply(ctx) {
@@ -360,67 +376,71 @@ window.__ModuleLoader__.load({
 
       /** kind → 我们自己注册的组件，用于从 slot 的 entries 里排除自己。 */
       const ownComponents = new Map()
-      /** 注册前抓一份官方条目快照，作为 ctx.slots.entries 不可用时的兜底。 */
+      /** 注册前抓一份官方条目快照：既要拿 component，也要拿 locale / inject。 */
       const captured = new Map()
       const entriesOfSlot = ctx.slots.entriesOfSlot
       if (typeof entriesOfSlot === 'function') {
         try {
           for (const entry of entriesOfSlot.call(ctx.slots, SLOT)) {
-            if (entry && entry.options && typeof entry.options.key === 'string') captured.set(entry.options.key, entry.component)
+            if (entry !== null && entry !== undefined && entry.options !== undefined && typeof entry.options.key === 'string') {
+              captured.set(entry.options.key, entry)
+            }
           }
         } catch (error) {
-          console.warn(`[${ID}] entriesOfSlot 快照失败：`, error)
+          report('capture', error)
         }
       }
 
       /**
-       * 找官方那条 entry 的 component。
+       * 找官方那条 entry。
        * 不能用 entriesOfSlot（它给的是"每个 cell 的胜者"，注册之后就是我们的遮蔽件），
        * 所以优先走原始 entries 视图，并用 component 身份把自己排除掉。
        */
-      function resolveOriginal(kind) {
+      function resolveEntry(kind) {
         const entries = ctx.slots.entries
+        const mine = ownComponents.get(kind)
         if (typeof entries === 'function') {
           try {
-            const mine = ownComponents.get(kind)
             for (const entry of entries.call(ctx.slots, SLOT)) {
-              if (!entry || !entry.options || entry.options.key !== kind) continue
+              if (entry === null || entry === undefined || entry.options === undefined || entry.options.key !== kind) continue
               if (mine !== undefined && entry.component === mine) continue
-              return entry.component
+              return entry
             }
           } catch (error) {
-            console.warn(`[${ID}] ctx.slots.entries 读取失败：`, error)
+            report('entries', error)
           }
         }
         return captured.get(kind)
       }
 
-      function register(kind, component) {
-        ownComponents.set(kind, component)
-        return ctx.slots.register({ name: SLOT, key: kind, priority: -1 }, component)
+      function resolveOriginal(kind) {
+        const entry = resolveEntry(kind)
+        return entry === undefined ? undefined : entry.component
       }
 
-      ctx.slots.inject(SLOT, () => {
-        const disposers = []
-        disposers.push(register('user', makeUserShadow(resolveOriginal)))
-        for (const kind of WRAP_KINDS) {
-          if (kind === 'user') continue
-          disposers.push(register(kind, makeHider(kind, resolveOriginal)))
-        }
-        return () => { for (const dispose of disposers) dispose() }
-      })
+      function register(kind, component) {
+        const official = resolveEntry(kind)
+        const options = official === undefined || official.options === undefined ? {} : official.options
+        ownComponents.set(kind, component)
+        return ctx.slots.register({
+          name: SLOT,
+          key: kind,
+          priority: -1,
+          // ⚠️ 必须复制官方的 locale / inject：kit.t 与 inject props 都由此而来，
+          // 不复制就会让官方组件抛 `t is not a function` / `useHostInfo is not a function`。
+          ...(options.locale === undefined ? {} : { locale: options.locale }),
+          ...(options.inject === undefined ? {} : { inject: options.inject }),
+        }, component)
+      }
 
-      console.log(`[${ID}] client ready; captured kinds =`, [...captured.keys()].join(','))
-      try {
-        fetch(`${API}/client-error`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            where: 'ready',
-            message: `entries=${typeof ctx.slots.entries} entriesOfSlot=${typeof ctx.slots.entriesOfSlot} captured=${[...captured.keys()].length} resolvedUser=${resolveOriginal('user') === undefined ? 'none' : 'ok'}`,
-          }),
-        }).catch(() => {})
-      } catch {}
+      ctx.slots.inject(SLOT, () => register('user', makeUserShadow(resolveOriginal)))
+
+      const official = resolveEntry('user')
+      report('ready', new Error(
+        `entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        ` locale=${official === undefined || official.options === undefined ? '?' : typeof official.options.locale}` +
+        ` inject=${official === undefined || official.options === undefined ? '?' : typeof official.options.inject}`,
+      ))
     }
 
     exports.apply = apply
