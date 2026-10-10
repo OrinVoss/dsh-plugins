@@ -96,7 +96,7 @@ window.__ModuleLoader__.load({
  * 所以此时把插进原生操作行的那两个按钮收起来，并撤掉为它们预留的 padding-right。
  */
 .me-root[data-editing="1"] .me-actions{display:none}
-.me-root[data-editing="1"] [data-clock="start"]{padding-right:0}
+.me-root[data-editing="1"] [data-clock="start"]{padding-right:0;visibility:hidden}
 /*
  * 过渡动画：气泡的蓝色填充 → 白底、无边框 → 蓝描线，再让 ✓/× 稍微后一步淡入。
  * 刻意**不做透明度/缩放**：编辑器的字号、行高、内边距与气泡逐项对齐（10px 16px 内容盒），
@@ -130,19 +130,27 @@ window.__ModuleLoader__.load({
  * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
  * 几何由内联样式给出（实测原气泡的 top/left/宽/最小高），所以整块不位移不跳尺寸。
  */
-.me-editor{box-sizing:border-box;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);
+.me-editor{box-sizing:border-box;max-width:100%;
   background:var(--dsw-alias-bg-base,#fff);
   border:1px solid var(--dsw-alias-state-business-primary,#4d6bfe);
   border-radius:var(--dsw-radius-xl);
   padding:9px 15px;color:var(--dsw-alias-label-primary);
   font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));
-  display:flex;flex-direction:column;gap:6px}
+  display:flex;flex-direction:column}
 .me-editor-input{box-sizing:border-box;width:100%;margin:0;padding:0;
   min-height:calc(22px + var(--dsh-content-font-delta,0px));max-height:40vh;overflow-y:auto;resize:none;
   background:0 0;border:0;outline:none;color:inherit;font:inherit;line-height:inherit;
   white-space:pre-wrap;word-break:break-word}
 .me-editor-input::placeholder{color:var(--dsw-alias-label-tertiary)}
-.me-editor-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+/*
+ * ✓/✕ **不进盒子**：绝对定位到盒子下方（正好是官方操作行那一行）。
+ * 这一行曾经在盒子里占高度，导致编辑框永远比原气泡高一行——用户看到的
+ * "编辑框没贴合气泡"就是这个：底部多悬出来一条。
+ * 现在盒子的高度 = max(实测气泡高, 文字高+上下内边距)，初始状态下与气泡**完全相等**；
+ * 用户继续打字时盒子向下长，按钮跟着往下走。
+ */
+.me-editor-actions{position:absolute;right:0;top:calc(100% + 4px);
+  display:flex;align-items:center;justify-content:flex-end;gap:8px;
   height:calc(28px + var(--dsh-content-font-delta,0px))}
 /* 方钮几何抄官方 xD_KDq_action：28px+delta、radius-sm、label-tertiary、hover 换色、图标 15px+delta */
 .me-icon{box-sizing:border-box;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));
@@ -856,7 +864,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=10 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=11 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))
