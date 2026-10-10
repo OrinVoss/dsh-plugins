@@ -78,7 +78,14 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 [${HIDDEN_ATTR}]{display:none!important}
-.me-root{position:relative;display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:100%;min-width:0}
+/*
+ * 包装层必须是**普通块**，不能是 flex：官方 .userStack 的
+ * max-width:min(calc(--dsh-chat-content-width * .702), 82%) 里那 82% 是相对
+ * .userRow 的宽度算的。一旦把 .userRow 变成 align-items:flex-end 下的 flex item，
+ * 它就收缩到内容宽，82% 的基准随之变小 —— 同一句话会比原生更早换行（2026-10-11 用户截图：
+ * 同一条消息一条一行、一条两行）。我们的按钮/编辑框/确认气泡全是绝对定位，不需要 flex。
+ */
+.me-root{position:relative;display:block;width:100%;min-width:0}
 /*
  * 操作行落在**原生操作行内部**：官方 MessageIconActions 的 extraActions 就排在这两个位置
  * （复制键之后、同样 gap 8、同样 28px+delta 的方钮）。气泡那侧的调用点没传 extraActions，
@@ -889,7 +896,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=12 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=13 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))
