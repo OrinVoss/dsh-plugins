@@ -2,7 +2,7 @@
   "name": "dsh-style-extras",
   "version": "1.0.0",
   "private": true,
-  "description": "样式扩展：把 Token 用量统计、系统状态、皮肤、临时提问（/btw）、消息撤回/编辑五个插件收在一个组合包里统一启停。",
+  "description": "拓展包：把 Token 用量统计、系统状态、皮肤、临时提问（/btw）、消息撤回/编辑五个插件收在一个组合包里统一启停。",
   "icon": "./icon.svg",
   "main": "index.js",
   "type": "commonjs",

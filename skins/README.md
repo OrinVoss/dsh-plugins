@@ -145,7 +145,7 @@ ctx.skins.subscribe(fn)   // 返回退订函数
 
 ## 安装
 
-本插件现在是 **`dsh-style-extras`（样式扩展）组合包的成员**：加载行由组合包的
+本插件现在是 **`dsh-style-extras`（拓展包）组合包的成员**：加载行由组合包的
 [`cordis.patch.yml`](../style-extras/cordis.patch.yml) 声明（`insert: id: skins`），
 本包自己不再往 profile 的 patch 里 insert，也没有 `dsh.bundle`。
 
@@ -156,7 +156,7 @@ profile 侧需要两处声明：
 
 > ⚠️ 不要再往 profile 的 `cordis.patch.yml` 里 insert `id: skins`——同一 id 插两次会加载两遍。
 
-装完后侧栏「插件」页的「已安装」里会出现「样式扩展」卡片，点进去能看到**皮肤**这一行
+装完后侧栏「插件」页的「已安装」里会出现「拓展包」卡片，点进去能看到**皮肤**这一行
 （图标来自本包的 `icon.svg`，标题/描述来自 `locale/zh.json` 的 `meta`）。
 
 客户端半边的更新：桌面端在 `client.js` 变更后会重新拉取并重新装配（2026-10-08 实测，

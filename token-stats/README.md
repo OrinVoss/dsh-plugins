@@ -53,7 +53,7 @@ DSH 把每个会话写在 `$DSH_HOME/sessions/<workspace-key>/<session-dir>/` �
 
 ## 安装
 
-本插件现在是 **`dsh-style-extras`（样式扩展）组合包的成员**：它自己不再声明 `dsh.bundle`，
+本插件现在是 **`dsh-style-extras`（拓展包）组合包的成员**：它自己不再声明 `dsh.bundle`，
 加载行统一由组合包的 [`cordis.patch.yml`](../style-extras/cordis.patch.yml) 声明
 （`insert: id: token-stats`）。装法：
 
@@ -62,7 +62,7 @@ DSH 把每个会话写在 `$DSH_HOME/sessions/<workspace-key>/<session-dir>/` �
    "dsh-token-stats": "link:C:/Users/17040/.dsh/plugins/token-stats"
    ```
 2. 在 profile 的 `dsh.profile.bundles` 里列出 **组合包 `dsh-style-extras`**（不是本包）。
-3. 重启桌面端。侧栏「插件」页会出现一张「样式扩展」卡片，点进去能看到
+3. 重启桌面端。侧栏「插件」页会出现一张「拓展包」卡片，点进去能看到
    **Token 用量统计** 这一行，带自己的开关。
 
 > ⚠️ **不要在 profile 的 `cordis.patch.yml` 里再 `insert` 一次本行**：同一 id 插两次会加载两遍
@@ -70,7 +70,7 @@ DSH 把每个会话写在 `$DSH_HOME/sessions/<workspace-key>/<session-dir>/` �
 
 **生效方式**：
 
-- **宿主半边**：在插件页把「样式扩展」关掉再打开即可触发一次重载，实测不必重启。
+- **宿主半边**：在插件页把「拓展包」关掉再打开即可触发一次重载，实测不必重启。
 - **客户端面板**（侧栏图标）：改动要重启桌面端。
 
 ### 配置

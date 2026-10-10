@@ -22,7 +22,7 @@ DSH 的**系统状态**插件：侧栏底部常驻一个 CPU 占用圆环，点�
 
 ## 安装
 
-本插件是 **`dsh-style-extras`（样式扩展）组合包的成员**：加载行由组合包的
+本插件是 **`dsh-style-extras`（拓展包）组合包的成员**：加载行由组合包的
 [`cordis.patch.yml`](../style-extras/cordis.patch.yml) 声明（`insert: id: sysmon`），
 本包自己不声明 `dsh.bundle`。
 
@@ -31,5 +31,5 @@ profile 侧需要两处声明：
 1. `profiles\desktop\package.json` 的 `dependencies`：`"dsh-sysmon": "link:C:/Users/17040/.dsh/plugins/sysmon"`
 2. `profiles\desktop\package.json` 的 `dsh.profile.bundles` 里列出 **`dsh-style-extras`**（不是本包）
 
-装完后侧栏「插件」页的「已安装」里会出现「样式扩展」卡片，点进去能看到**系统状态**这一行
+装完后侧栏「插件」页的「已安装」里会出现「拓展包」卡片，点进去能看到**系统状态**这一行
 （图标来自本包的 `icon.svg`，标题/描述来自 `locale/zh.json` 的 `meta`）。

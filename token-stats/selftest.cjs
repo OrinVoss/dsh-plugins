@@ -224,7 +224,7 @@ test('缺失 usage 的步不会被计入（由扫描层过滤）', () => {
 
 console.log('\n[4] 包声明')
 
-test('package.json 声明了 client 半边与展示元信息（成员身份由样式扩展组合包声明）', () => {
+test('package.json 声明了 client 半边与展示元信息（成员身份由拓展包组合包声明）', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
   assert.strictEqual(pkg.name, 'dsh-token-stats')
   assert.strictEqual(pkg.main, 'host.js')

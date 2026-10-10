@@ -1,4 +1,4 @@
-# dsh-style-extras —— 「样式扩展」组合包
+# dsh-style-extras —— 「拓展包」组合包
 
 把五个自研插件收在**一个组合包（bundle）**里的容器，让它们在侧栏**「插件」页的「已安装」**
 里是**一张卡片**，点进去是五行成员，各自带开关；停用整张卡片＝五行一起停。
@@ -27,7 +27,7 @@ dsh-style-extras/cordis.patch.yml
   └─ insert: id: message-edit  name: dsh-message-edit
         │
         ▼
-插件页「已安装」→ 一张「样式扩展」卡片 + 五行成员，各自开关
+插件页「已安装」→ 一张「拓展包」卡片 + 五行成员，各自开关
 ```
 
 五个成员**仍然是各自独立的包**（profile 的 `dependencies` 里各自 `link:`），只是不再自己
