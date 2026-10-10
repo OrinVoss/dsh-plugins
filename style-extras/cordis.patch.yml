@@ -1,21 +1,22 @@
 # dsh-style-extras —— 「拓展包」组合包自己的 patch 层。
 #
-# 本包不注册任何工具 / 服务 / 面板，只贡献这一份 patch，把五个自研插件
+# 本包不注册任何工具 / 服务 / 面板，只贡献这一份 patch，把六个自研插件
 # 收在一个组合包里统一启停：
 #
 #   token-stats   Token 用量统计（宿主聚合 + 侧栏报表面板）
-#   sysmon        系统状态（宿主采集 + 侧栏面板）
+#   sysmon        系统状态（宿主采集 + 侧栏一排圆环）
 #   skins         皮肤（客户端 token 层 + 设置 → 通用 的皮肤行）
+#   pet           桌面宠物（浮层 + 设置 → 通用 的宠物行）
 #   btw           临时提问 /btw（右侧栏「开始」页的旁支提问卡片）
 #   message-edit  消息撤回 / 编辑（宿主 surface replace + 客户端原生操作行按钮）
 #
-# 五个成员各自仍是独立的包，由 profile 的 dependencies 各自 link；这里只声明
+# 六个成员各自仍是独立的包，由 profile 的 dependencies 各自 link；这里只声明
 # 它们的加载行。成员包的 package.json 不再带 dsh.bundle，也绝不要在本文件之外
 # 再 insert 同一 id —— `applyEntryPatches` 只做 push，同 id 插两次会加载两遍。
 #
 # 用户仍可在 profile 的 cordis.patch.yml 里按 `id: token-stats` / `id: sysmon` /
-# `id: skins` / `id: btw` / `id: message-edit` 覆盖下面的 config，或写 `disabled: true` 单独停用某一行；
-# 停用整个组合包则五行一起停。
+# `id: skins` / `id: pet` / `id: btw` / `id: message-edit` 覆盖下面的 config，或写 `disabled: true` 单独停用某一行；
+# 停用整个组合包则六行一起停。
 - insert:
     - id: token-stats
       name: dsh-token-stats
@@ -28,6 +29,8 @@
       name: dsh-sysmon
     - id: skins
       name: dsh-skins
+    - id: pet
+      name: dsh-pet
     - id: btw
       name: dsh-btw
     - id: message-edit

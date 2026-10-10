@@ -520,22 +520,22 @@ test('PetRuntime 能挂载、切换宠物并持久化', () => {
 })
 
 console.log('\n[10] 包声明')
-test('package.json 是组合包并带展示元信息', () => {
+test('package.json 是拓展包组合包的成员并带展示元信息', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
   assert(pkg.name === 'dsh-pet', '包名不对')
-  assert(pkg.dsh && pkg.dsh.bundle && pkg.dsh.bundle.patch === './cordis.patch.yml', '缺少 bundle patch')
+  assert(!(pkg.dsh && pkg.dsh.bundle), '成员包不应自带 dsh.bundle')
   assert(pkg.dsh.client && pkg.dsh.client.platform === 'web', '缺少 dsh.client')
   assert(pkg.icon === './icon.svg', '缺少 icon')
   assert(pkg.exports['./locale/*.json'] === './locale/*.json', 'exports 未放开 locale')
-  for (const file of ['host.js', 'client.js', 'cordis.patch.yml', 'icon.svg', 'locale/zh.json', 'locale/en.json']) {
+  for (const file of ['host.js', 'client.js', 'icon.svg', 'locale/zh.json', 'locale/en.json']) {
     assert(fs.existsSync(path.join(__dirname, file)), '缺少文件 ' + file)
   }
 })
 
-test('cordis.patch.yml 的 insert 与包名一致', () => {
-  const yml = fs.readFileSync(path.join(__dirname, 'cordis.patch.yml'), 'utf8')
-  assert(/id:\s*pet\b/.test(yml), 'patch 缺少 id: pet')
-  assert(/name:\s*dsh-pet\b/.test(yml), 'patch 缺少 name: dsh-pet')
+test('拓展包的 patch 里声明了本包', () => {
+  const yml = fs.readFileSync(path.join(__dirname, '..', 'style-extras', 'cordis.patch.yml'), 'utf8')
+  assert(/id:\s*pet\b/.test(yml), '拓展包 patch 缺少 id: pet')
+  assert(/name:\s*dsh-pet\b/.test(yml), '拓展包 patch 缺少 name: dsh-pet')
 })
 
 console.log('\n' + passed + ' 项通过，' + failures.length + ' 项失败')
