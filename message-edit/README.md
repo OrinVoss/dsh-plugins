@@ -94,13 +94,15 @@ return <div className="me-root">
 
 ## 三、HTTP 接口
 
-与 `btw` / `sysmon` 同一套 `ctx.webServer` 约定（本地回环）。
+与 `btw` / `sysmon` 同一套 `ctx.webServer` 约定（本地回环，仅本机可访问）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/message-edit-api/state?sessionId=` | `{ live, idle, hiddenTurns, ops, targets }` |
+| GET | `/message-edit-api/state?sessionId=` | `{ live, idle, hiddenTurns, ops, targets, clientErrors, recentOps, liveSessions }` |
 | POST | `/message-edit-api/apply` | `{ sessionId, seq, action:'retract'|'edit', text? }` |
 | POST | `/message-edit-api/selftest` | 在**临时会话**（`prepare`，不进 store）上验证替换机制 |
+| POST | `/message-edit-api/client-error` | 客户端渲染错误上报（诊断通道） |
+| POST | `/message-edit-api/debug/prompt` | **仅诊断**：单独试 `sessionController.prompt`，返回逐次尝试的错误 |
 
 `apply` 成功返回 `{ ok, cutSeq, startSeq, endSeq, shadowed, hiddenTurns, prompted, promptError? }`。
 `prompted` 表示编辑后是否成功自动重发（`sessionController.prompt`）；失败会把原因放进 `promptError`，
@@ -114,7 +116,35 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
 
 ---
 
-## 四、配置
+## 四、真机实测攒下的四个硬坑
+
+这几条是踩完才写下来的，改这个插件时**一个字都别省**：
+
+1. **slot core 把 `locale` / `inject` / `children` 存在 entry 本身，不在 `entry.options` 里。**
+   只有 `key` / `id` / `order` / `label` / `priority` 进 `options`。读错地方 → 复制不到 `locale` 与 `inject`。
+2. **遮蔽条必须复制官方条目的 `locale` 与 `inject`。**
+   `kit.t` 只在条目声明了 `locale` 时注入，`inject` 提供的 props（如 `useHostInfo`）同理。
+   不复制 → 官方组件在渲染时抛 `t is not a function` / `useHostInfo is not a function`，
+   slot 会把我们的条目**让位（abdicated）**，表现为「按钮根本没出现」而界面一切正常。
+3. **找官方条目要按 `priority === 0`，不能只按 component 身份排除自己。**
+   客户端热更后，上一次注册的遮蔽条可能还留在账本里，会被误认成「官方条目」。
+   遮蔽优先级因此取 `-999`，压过历史遗留的 `-1`。
+4. **`sessionController.prompt(request, signal)` 的 signal 必须是真的 `AbortSignal`。**
+   内部会调 `signal.throwIfAborted()`，传 `undefined` 会抛
+   `Cannot read properties of undefined (reading 'throwIfAborted')`。
+   这个坑的破坏性最大：替换已经落盘、重发却失败 → 对话被清空且没有新回答。
+   修法是 `AbortSignal.timeout(60_000)`；失败时 `promptError` 会回给界面。
+
+另外两条设计约束：
+- 不要用「wrap 每一种 chat node 渲染器」来隐藏行：官方 `tool-call` / `turn-tail` / `command`
+  自己声明了 children slot，而同一个 child slot 不能声明两次；不声明就拿不到官方 kit 里的
+  `renderSlot`，转发 props 后官方组件会崩。改为按 `data-chat-turn` 做作用域内的行过滤。
+- 官方 `user` 气泡的 operations 行只传了 `text/time`，所以 `MessageIconActions` 支持的
+  `extraActions` 用不上；只能整条遮蔽 `user` 渲染器再把自己的按钮挂在外面。
+
+---
+
+## 五、配置
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
@@ -124,7 +154,7 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
 
 ---
 
-## 五、已知限制
+## 六、已知限制
 
 - 客户端的隐藏是**按轮次**的粗粒度：撤回一条消息会隐藏它所在轮次及其之后的所有轮次
   （这正是「从此处回退」的语义，但如果那一轮里有 steering 消息，会被一起隐藏）。
@@ -132,12 +162,16 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
   此时界面不会隐藏（点开会话后会重新拉取）。
 - 撤回不可撤销（没有「恢复」按钮）。原始日志还在，但本插件不提供反遮蔽 UI。
 - 不处理附件消息的图片编辑（只编辑文本块；附件原样保留在历史里）。
+- **编辑失败时历史已被改写**：`promptError` 只会以提示条告知，不会回滚（日志是 append-only，无法回滚）。
 - `request/header` 的 `series` 快照依赖 agent loop 自己发现表面变化；连续操作之间若立刻发新消息，
   仍按 loop 的正常路径处理。
+- `/message-edit-api/debug/prompt` 是无鉴权的本地诊断路由（和 `apply` 一样只监听回环）；
+  不需要时删掉这个 `ctx.effect` 即可。
 
-## 六、自检
+## 七、自检
 
 ```powershell
 node selfcheck.cjs            # 语法 + 静态断言（不启动 DSH）
-curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
+node selftest.cjs 19387       # 打运行中的桌面端：路由可达 + 机制自检
 ```
+
