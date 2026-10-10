@@ -93,6 +93,27 @@ window.__ModuleLoader__.load({
 .me-root[data-editing="1"] .me-actions{display:none}
 .me-root[data-editing="1"] [data-clock="start"]{padding-right:0}
 /*
+ * 过渡动画：气泡的蓝色填充 → 白底、无边框 → 蓝描线，再让 ✓/× 稍微后一步淡入。
+ * 刻意**不做透明度/缩放**：编辑器的字号、行高、内边距与气泡逐项对齐（10px 16px 内容盒），
+ * 所以文字在原地不动，只有底色与描线在变——这才是"无缝"。
+ */
+@keyframes me-edit-morph{
+  0%{background:var(--dsw-specific-bubble);border-color:transparent}
+  100%{background:var(--dsw-alias-bg-base,#fff);border-color:var(--dsw-alias-state-business-primary,#4d6bfe)}
+}
+@keyframes me-edit-fade{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+.me-editor{animation:me-edit-morph 160ms cubic-bezier(.2,.7,.3,1) both}
+.me-editor-actions{animation:me-edit-fade 140ms ease 70ms backwards}
+/*
+ * 退出编辑时操作行消失又出现：让它在切回来时也淡入一下。
+ * ⚠️ 只能用 backwards，不能用 both —— both 会长期把 opacity 钉在 1，
+ * 压过"非最后一条用户消息默认隐藏、悬停才显形"的规则。
+ */
+.me-actions{animation:me-edit-fade 140ms ease backwards}
+@media (prefers-reduced-motion:reduce){
+  .me-editor,.me-editor-actions,.me-actions{animation:none}
+}
+/*
  * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
  * 几何由内联样式给出（实测原气泡的 top/left/宽/最小高），所以整块不位移不跳尺寸。
  */
