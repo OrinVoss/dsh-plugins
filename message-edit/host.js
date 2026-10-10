@@ -331,6 +331,50 @@ module.exports = {
 
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
+      path: '/message-edit-api/debug/prompt',
+      handler: (req, res) => {
+        if (req.method !== 'POST') return fail(res, 405, 'POST only')
+        readJson(req).then(async (body) => {
+          const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+          const text = typeof body.text === 'string' ? body.text : 'ping'
+          const controller = ctx.get('sessionController')
+          const agents = ctx.get('agents')
+          const report = {
+            ok: false,
+            sessionId,
+            hasController: controller !== undefined,
+            hasAgents: agents !== undefined,
+            liveSession: liveSession(sessionId) !== undefined,
+            liveAgent: agents === undefined ? null : agents.get(sessionId) !== undefined,
+            attempts: [],
+          }
+          if (controller === undefined) return sendJson(res, 200, report)
+          const request = { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text }] }
+          const attempt = async (label, run) => {
+            try {
+              const value = await run()
+              report.attempts.push({ label, ok: true, value })
+              report.ok = true
+              return true
+            } catch (error) {
+              report.attempts.push({ label, ok: false, error: String(error && error.message ? error.message : error), code: error && error.code })
+              return false
+            }
+          }
+          await attempt('direct', () => controller.prompt(request, undefined))
+          if (report.ok !== true && agents !== undefined) {
+            const agent = agents.get(sessionId)
+            if (agent !== undefined) {
+              await attempt('withInitiator', () => agents.withInitiator(agent, () => controller.prompt(request, undefined)))
+            }
+          }
+          sendJson(res, 200, report)
+        }, (error) => fail(res, 400, error && error.message ? error.message : error))
+      },
+    }), 'dsh-message-edit: debug prompt route')
+
+    ctx.effect(() => ctx.webServer.register({
+      kind: 'exact',
       path: '/message-edit-api/state',
       handler: (req, res) => {
         try {
