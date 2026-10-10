@@ -279,11 +279,13 @@ module.exports = {
             prompted = true
           } catch (error) {
             promptError = error && error.message ? error.message : String(error)
+            ctx.logger?.warn?.(`[${NAME}] prompt 失败（session ${sessionId}）：${promptError}`)
+            if (error && error.stack) ctx.logger?.warn?.(String(error.stack).slice(0, 800))
           }
         }
       }
 
-      return {
+      const result = {
         ok: true,
         action,
         cutSeq: cut.seq,
@@ -294,12 +296,17 @@ module.exports = {
         prompted,
         ...(promptError === undefined ? {} : { promptError }),
       }
+      recentOps.push({ time: Date.now(), sessionId, action, seq, ...(promptError === undefined ? {} : { promptError }) })
+      if (recentOps.length > 20) recentOps.shift()
+      return result
     }
 
     // ----------------------------------------------------------- 路由
 
     /** 客户端上报的渲染错误（环形缓冲，方便真机排查）。 */
     const clientErrors = []
+    /** 最近的 apply 记录（含 prompt 失败原因），供真机排查。 */
+    const recentOps = []
 
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
@@ -328,7 +335,12 @@ module.exports = {
       handler: (req, res) => {
         try {
           const url = new URL(req.url || '/', 'http://127.0.0.1')
-          sendJson(res, 200, { ...sessionState(url.searchParams.get('sessionId') || ''), clientErrors })
+          sendJson(res, 200, {
+            ...sessionState(url.searchParams.get('sessionId') || ''),
+            clientErrors,
+            recentOps,
+            liveSessions: ctx.sessions.list().map((item) => ({ id: item.id, createdAt: item.header?.createdAt, seq: item.seq })),
+          })
         } catch (error) {
           fail(res, 500, error && error.message ? error.message : error)
         }
