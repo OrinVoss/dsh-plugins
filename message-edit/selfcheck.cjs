@@ -16,7 +16,7 @@ const check = (name, ok, detail) => {
 }
 
 // 1) 文件齐备
-for (const file of ['host.js', 'client.js', 'package.json', 'cordis.patch.yml', 'README.md']) {
+for (const file of ['host.js', 'client.js', 'package.json', 'icon.svg', 'locale/zh.json', 'locale/en.json', 'README.md']) {
   check(`存在 ${file}`, fs.existsSync(path.join(dir, file)))
 }
 
@@ -88,9 +88,9 @@ check('转发官方 props', /React\.createElement\(Original, props\)/.test(clien
 check('样式自带 data-plugin', /setAttribute\('data-plugin'/.test(client))
 
 const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
-check('package.json 声明 bundle patch', pkg.dsh && pkg.dsh.bundle && pkg.dsh.bundle.patch === './cordis.patch.yml')
+check('package.json 不再自带 bundle（它是样式扩展的成员）', !(pkg.dsh && pkg.dsh.bundle))
 check('package.json 声明客户端半边', pkg.dsh && pkg.dsh.client && pkg.dsh.client.platform === 'web')
-check('patch 里的 id 与包名一致', fs.readFileSync(path.join(dir, 'cordis.patch.yml'), 'utf8').includes(`name: ${pkg.name}`))
+check('样式扩展的 patch 里声明了本包', fs.readFileSync(path.join(dir, '..', 'style-extras', 'cordis.patch.yml'), 'utf8').includes(`name: ${pkg.name}`))
 
 process.stdout.write(notes.join('\n') + '\n')
 if (failures.length > 0) {

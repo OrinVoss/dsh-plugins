@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Message Retract / Edit",
+    "description": "Retract or edit already-sent user messages: the host rewrites the model context in place, the client adds two icon buttons to the native action row."
+  }
+}

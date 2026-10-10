@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Style Extras",
-    "description": "Bundle that groups the Token usage report, System status and Skins plugins so they enable and disable together."
+    "description": "Bundle that groups the Token usage report, System status, Skins, the /btw side-question card and message retract/edit so they enable and disable together."
   }
 }
