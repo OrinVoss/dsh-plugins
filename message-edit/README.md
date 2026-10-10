@@ -180,7 +180,7 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
 
 在 profile 的 `cordis.patch.yml` 里按 `id: message-edit` 覆盖即可。
 
-本包是**样式扩展（`dsh-style-extras`）组合包的成员**：加载行由 style-extras 的
+本包是**拓展包（`dsh-style-extras`）组合包的成员**：加载行由 style-extras 的
 `cordis.patch.yml` 声明（`insert id: message-edit`），profile 的 `dsh.profile.bundles` 里
 列的是 `dsh-style-extras`，本包自己不带 `dsh.bundle`。
 

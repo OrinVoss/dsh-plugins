@@ -1,4 +1,4 @@
-# dsh-style-extras —— 「样式扩展」组合包自己的 patch 层。
+# dsh-style-extras —— 「拓展包」组合包自己的 patch 层。
 #
 # 本包不注册任何工具 / 服务 / 面板，只贡献这一份 patch，把五个自研插件
 # 收在一个组合包里统一启停：
