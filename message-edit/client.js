@@ -86,9 +86,16 @@ window.__ModuleLoader__.load({
   [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]):hover .me-actions,
   [data-chat-flow-kind=user]:has(~ [data-chat-flow-kind=user]):focus-within .me-actions{opacity:1}
 }
+/*
+ * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
+ * 几何与官方用户气泡完全一致（radius-xl、同字号行高、内容盒同为 10px 16px ——
+ * 边框 1px 用内边距 9px 15px 抵消，所以整块不位移不跳尺寸）。
+ */
 .me-editor{box-sizing:border-box;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);
-  background:var(--dsw-specific-bubble);border-radius:var(--dsw-radius-xl);
-  padding:10px 16px;color:var(--dsw-alias-label-primary);
+  background:var(--dsw-alias-bg-base,#fff);
+  border:1px solid var(--dsw-alias-state-business-primary,#4d6bfe);
+  border-radius:var(--dsw-radius-xl);
+  padding:9px 15px;color:var(--dsw-alias-label-primary);
   font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));
   display:flex;flex-direction:column;gap:6px}
 .me-editor-input{box-sizing:border-box;width:100%;margin:0;padding:0;
@@ -283,17 +290,22 @@ window.__ModuleLoader__.load({
       }), React.createElement('path', { d: 'M7.7849 8.23878L13.888 2.13574', stroke: 'currentColor' }))
     }
 
-    /** 官方 `IconTrashOutlineRegular` 的 art work，同样内联。 */
-    function IconTrash({ className }) {
+    /**
+     * 「撤回」= 掉头箭头（↩ 的 U-turn 变体：横线向右、绕半圆折回左下、左端带箭头）。
+     *
+     * 官方图标库里没有撤销/掉头箭头（只有垃圾桶、×、←、↻），按用户给的参考图形
+     * 手绘同形路径，但保持官方图标那套约定：viewBox 16×16、`fill:none`、`stroke:currentColor`、
+     * strokeWidth 1，所以和旁边的复制键视觉一致。
+     */
+    function IconRetract({ className }) {
       return React.createElement('svg', {
         className, width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none',
         xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': 'true', strokeWidth: 1,
       },
-      React.createElement('path', { d: 'M1.28149 3.88831H14.7187', stroke: 'currentColor' }),
-      React.createElement('path', { d: 'M5.41602 3.88833V2.47962C5.41602 2.29282 5.52492 2.11366 5.71876 1.98157C5.9126 1.84948 6.17551 1.77527 6.44964 1.77527H9.55053C9.82466 1.77527 10.0876 1.84948 10.2814 1.98157C10.4753 2.11366 10.5842 2.29282 10.5842 2.47962V3.88833', stroke: 'currentColor' }),
-      React.createElement('path', { d: 'M2.57349 3.88831L3.19366 13.2943C3.21937 13.5502 3.33952 13.7872 3.53065 13.9593C3.72178 14.1313 3.97016 14.2259 4.22729 14.2246H11.7728C12.0299 14.2259 12.2783 14.1313 12.4694 13.9593C12.6605 13.7872 12.7807 13.5502 12.8064 13.2943L13.4266 3.88831', stroke: 'currentColor' }),
-      React.createElement('path', { d: 'M6.44946 6.98926V11.1238', stroke: 'currentColor' }),
-      React.createElement('path', { d: 'M9.55054 6.98926V11.1238', stroke: 'currentColor' }))
+      // 横线 → 右侧半圆折回 → 底部回程
+      React.createElement('path', { d: 'M2 6.5H10A3 3 0 0 1 10 12.5H6.4', stroke: 'currentColor' }),
+      // 左端箭头
+      React.createElement('path', { d: 'M5 3.5L2 6.5L5 9.5', stroke: 'currentColor' }))
     }
 
     /**
@@ -309,6 +321,7 @@ window.__ModuleLoader__.load({
         const [editing, setEditing] = React.useState(false)
         const [draft, setDraft] = React.useState('')
         const [busy, setBusy] = React.useState(false)
+        const [editWidth, setEditWidth] = React.useState(null)
         const originalText = React.useMemo(() => textOf(data), [data])
         const inputRef = React.useRef(null)
 
@@ -397,12 +410,43 @@ window.__ModuleLoader__.load({
 
         const Original = resolveOriginal('user')
 
+        /**
+         * 量出当前气泡的实测宽度。
+         *
+         * 编辑态要"大小位置跟之前一样"，而官方气泡是 shrink-to-fit 的（`.userStack` 限宽、
+         * 气泡按内容收缩），所以必须实测，不能靠 max-width 猜。层级取
+         * `root > .userRow > .userStack > 最宽的子元素`（最宽的那个就是气泡；
+         * 附件行/引用摘要一般不会更宽）。
+         */
+        const measureBubbleWidth = React.useCallback(() => {
+          const root = rootRef.current
+          if (root === null) return null
+          const row = root.firstElementChild
+          const stack = row === null ? null : row.firstElementChild
+          if (stack === null) return null
+          let width = null
+          for (const child of stack.children) {
+            const rect = child.getBoundingClientRect()
+            if (rect.width > 0 && (width === null || rect.width > width)) width = rect.width
+          }
+          return width === null ? null : Math.round(width)
+        }, [])
+
+        const beginEdit = React.useCallback(() => {
+          setEditWidth(measureBubbleWidth())
+          setDraft(originalText)
+          setEditing(true)
+        }, [measureBubbleWidth, originalText])
+
         if (editing) {
-          // 几何与官方用户气泡一致（宽度上限 / radius-xl / 10px 16px / 同字号行高），
-          // 所以点编辑时气泡原地变成输入态，不跳、不错位。
+          // 几何与官方用户气泡一致（宽度实测复用原气泡宽度 / radius-xl / 内容盒 10px 16px /
+          // 同字号行高），所以点编辑时气泡原地变成输入态：白底 + 蓝描线，不跳、不错位。
           // 按键行为照抄 QueueDock 的 QueueEditor：Enter 保存、Shift+Enter 换行、Esc 取消。
           return React.createElement('div', { className: 'me-root', ref: rootRef },
-            React.createElement('div', { className: 'me-editor' },
+            React.createElement('div', {
+              className: 'me-editor',
+              style: editWidth === null ? undefined : { width: `${editWidth}px`, minWidth: '180px' },
+            },
               React.createElement('textarea', {
                 ref: inputRef,
                 className: 'me-editor-input',
@@ -450,13 +494,13 @@ window.__ModuleLoader__.load({
             React.createElement('button', {
               type: 'button', className: 'me-icon', disabled: busy,
               'aria-label': COPY.edit, title: COPY.edit,
-              onClick: () => { setDraft(originalText); setEditing(true) },
+              onClick: beginEdit,
             }, React.createElement(IconEdit, {})),
             React.createElement('button', {
               type: 'button', className: 'me-icon', disabled: busy,
               'aria-label': COPY.retract, title: COPY.retract,
               onClick: () => { void run('retract') },
-            }, React.createElement(IconTrash, {})),
+            }, React.createElement(IconRetract, {})),
           ),
         )
       }
