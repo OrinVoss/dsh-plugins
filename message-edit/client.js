@@ -448,18 +448,20 @@ window.__ModuleLoader__.load({
 
       function register(kind, component) {
         const official = resolveEntry(kind)
-        const options = official === undefined || official.options === undefined ? {} : official.options
         ownComponents.set(kind, component)
+        // ⚠️ slot core 把 locale / inject / children 存在 **entry 本身**上，
+        // 不在 `entry.options` 里（只有 key / id / order / label / priority 进 options）。
+        // 复制官方的 locale → kit.t 才有值；复制 inject → 官方 inject 的 props（如 useHostInfo）才有值。
+        // 不复制就会让官方组件抛 `t is not a function` / `useHostInfo is not a function`，
+        // 条目被 slot 让位（abdicated），按钮也就不出现。
         return ctx.slots.register({
           name: SLOT,
           key: kind,
           // 用远低于官方的优先级：既是遮蔽（slot core：同 key 不同 priority 共存、
           // priority 最小者渲染），也能压过客户端热更遗留的旧 -1 遮蔽条。
           priority: -999,
-          // ⚠️ 必须复制官方的 locale / inject：kit.t 与 inject props 都由此而来，
-          // 不复制就会让官方组件抛 `t is not a function` / `useHostInfo is not a function`。
-          ...(options.locale === undefined ? {} : { locale: options.locale }),
-          ...(options.inject === undefined ? {} : { inject: options.inject }),
+          ...(official === undefined || official.locale === undefined ? {} : { locale: official.locale }),
+          ...(official === undefined || official.inject === undefined ? {} : { inject: official.inject }),
         }, component)
       }
 
@@ -469,7 +471,7 @@ window.__ModuleLoader__.load({
       try {
         for (const entry of ctx.slots.entries.call(ctx.slots, SLOT)) {
           if (entry !== null && entry !== undefined && entry.options !== undefined && entry.options.key === 'user') {
-            probe.push(`${entry.options.priority ?? 0}/loc:${entry.options.locale === undefined ? '-' : String(entry.options.locale)}/inj:${entry.options.inject === undefined ? '-' : typeof entry.options.inject}`)
+            probe.push(`${entry.options.priority ?? 0}/loc:${String(entry.locale)}/inj:${typeof entry.inject}`)
           }
         }
       } catch (error) {
@@ -477,8 +479,8 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=4 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
-        ` officialLocale=${official === undefined || official.options === undefined ? '?' : String(official.options.locale)}` +
+        `v=5 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))
     }
