@@ -49,8 +49,12 @@ check('不删除日志事件（无 truncate/splice 掉日志）', !/\.log\.splic
 // 4) 客户端半边关键点
 check('客户端走 __ModuleLoader__', /__ModuleLoader__\.load\(/.test(client))
 check('只 require react', (client.match(/require\((?![^)]*react)[^)]*\)/g) ?? []).length === 0)
-check('注册进 conversation.chat.node 的 user key', /name:\s*SLOT,\s*key:\s*kind,\s*priority:\s*-1/.test(client))
-check('priority -1 遮蔽', /priority:\s*-1/.test(client))
+check('注册进 conversation.chat.node 的 user key', /name:\s*SLOT,\s*key:\s*kind,\s*\/\/[^\n]*\n\s*priority:\s*-\d+/.test(client) || /name:\s*SLOT,\s*key:\s*kind/.test(client))
+check('负 priority 遮蔽', /priority:\s*-\d+/.test(client))
+check('复制官方 locale', /options\.locale === undefined \? \{\} : \{ locale: options\.locale \}/.test(client))
+check('复制官方 inject', /options\.inject === undefined \? \{\} : \{ inject: options\.inject \}/.test(client))
+check('官方条目按 priority 0 定位', /\(entry\.options\.priority \?\? 0\) === 0/.test(client))
+check('按轮次的行过滤', /data-chat-turn/.test(client) && /applyHiddenRows/.test(client))
 check('转发官方 props', /React\.createElement\(Original, props\)/.test(client))
 check('样式自带 data-plugin', /setAttribute\('data-plugin'/.test(client))
 

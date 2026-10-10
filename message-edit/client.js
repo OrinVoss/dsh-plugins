@@ -376,41 +376,69 @@ window.__ModuleLoader__.load({
 
       /** kind → 我们自己注册的组件，用于从 slot 的 entries 里排除自己。 */
       const ownComponents = new Map()
-      /** 注册前抓一份官方条目快照：既要拿 component，也要拿 locale / inject。 */
+      /**
+       * 注册前抓一份官方条目快照（component + locale + inject）。
+       * 优先读原始 entries 并按 priority === 0 过滤；拿不到时退回 entriesOfSlot
+       * （后者在"上一次热更遗留的 -1 遮蔽条仍在账本里"时会返回那条遮蔽条，所以只能是兜底）。
+       */
       const captured = new Map()
-      const entriesOfSlot = ctx.slots.entriesOfSlot
-      if (typeof entriesOfSlot === 'function') {
-        try {
-          for (const entry of entriesOfSlot.call(ctx.slots, SLOT)) {
-            if (entry !== null && entry !== undefined && entry.options !== undefined && typeof entry.options.key === 'string') {
-              captured.set(entry.options.key, entry)
-            }
+      try {
+        const entries = ctx.slots.entries
+        if (typeof entries === 'function') {
+          for (const entry of entries.call(ctx.slots, SLOT)) {
+            if (entry === null || entry === undefined || entry.options === undefined) continue
+            if (typeof entry.options.key !== 'string') continue
+            if ((entry.options.priority ?? 0) !== 0) continue
+            captured.set(entry.options.key, entry)
           }
-        } catch (error) {
-          report('capture', error)
+        }
+      } catch (error) {
+        report('capture', error)
+      }
+      if (captured.size === 0) {
+        const entriesOfSlot = ctx.slots.entriesOfSlot
+        if (typeof entriesOfSlot === 'function') {
+          try {
+            for (const entry of entriesOfSlot.call(ctx.slots, SLOT)) {
+              if (entry !== null && entry !== undefined && entry.options !== undefined && typeof entry.options.key === 'string') {
+                captured.set(entry.options.key, entry)
+              }
+            }
+          } catch (error) {
+            report('capture', error)
+          }
         }
       }
 
       /**
        * 找官方那条 entry。
-       * 不能用 entriesOfSlot（它给的是"每个 cell 的胜者"，注册之后就是我们的遮蔽件），
-       * 所以优先走原始 entries 视图，并用 component 身份把自己排除掉。
+       *
+       * 两个坑：
+       *  1. 不能用 entriesOfSlot —— 它给的是"每个 cell 的胜者"，注册之后就是我们的遮蔽件；
+       *     要读原始 entries 视图。
+       *  2. 不能只靠 component 身份排除自己 —— 客户端热更后，上一次注册的 -1 遮蔽条可能
+       *     还留在账本里，会被误认成"官方条目"，于是 locale / inject 一个字都复制不到。
+       *     所以**优先按 priority === 0 定位官方条目**（官方一律用默认优先级 0）。
        */
       function resolveEntry(kind) {
+        const collected = []
         const entries = ctx.slots.entries
-        const mine = ownComponents.get(kind)
         if (typeof entries === 'function') {
           try {
             for (const entry of entries.call(ctx.slots, SLOT)) {
               if (entry === null || entry === undefined || entry.options === undefined || entry.options.key !== kind) continue
-              if (mine !== undefined && entry.component === mine) continue
-              return entry
+              collected.push(entry)
             }
           } catch (error) {
             report('entries', error)
           }
         }
-        return captured.get(kind)
+        const official = collected.find((entry) => (entry.options.priority ?? 0) === 0)
+        if (official !== undefined) return official
+        const capturedEntry = captured.get(kind)
+        if (capturedEntry !== undefined) return capturedEntry
+        const mine = ownComponents.get(kind)
+        return collected.find((entry) => entry.component !== mine)
       }
 
       function resolveOriginal(kind) {
@@ -425,7 +453,9 @@ window.__ModuleLoader__.load({
         return ctx.slots.register({
           name: SLOT,
           key: kind,
-          priority: -1,
+          // 用远低于官方的优先级：既是遮蔽（slot core：同 key 不同 priority 共存、
+          // priority 最小者渲染），也能压过客户端热更遗留的旧 -1 遮蔽条。
+          priority: -999,
           // ⚠️ 必须复制官方的 locale / inject：kit.t 与 inject props 都由此而来，
           // 不复制就会让官方组件抛 `t is not a function` / `useHostInfo is not a function`。
           ...(options.locale === undefined ? {} : { locale: options.locale }),
