@@ -267,6 +267,8 @@ module.exports = {
           promptError = 'sessionController 不可用：历史已改写，但没能自动重发，请手动发送。'
         } else {
           try {
+            // ⚠️ signal 必须是**真的** AbortSignal：prompt 内部会调 signal.throwIfAborted()，
+            // 传 undefined 会抛 "Cannot read properties of undefined (reading 'throwIfAborted')"。
             await controller.prompt(
               {
                 requestId: randomUUID(),
@@ -274,7 +276,7 @@ module.exports = {
                 mode: 'queue',
                 content: [{ type: 'text', text }],
               },
-              undefined,
+              AbortSignal.timeout(60_000),
             )
             prompted = true
           } catch (error) {
@@ -361,11 +363,12 @@ module.exports = {
               return false
             }
           }
-          await attempt('direct', () => controller.prompt(request, undefined))
+          const signal = AbortSignal.timeout(60_000)
+          await attempt('direct', () => controller.prompt(request, signal))
           if (report.ok !== true && agents !== undefined) {
             const agent = agents.get(sessionId)
             if (agent !== undefined) {
-              await attempt('withInitiator', () => agents.withInitiator(agent, () => controller.prompt(request, undefined)))
+              await attempt('withInitiator', () => agents.withInitiator(agent, () => controller.prompt(request, signal)))
             }
           }
           sendJson(res, 200, report)
