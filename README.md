@@ -22,18 +22,18 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 | 插件 | 包名 / 版本 | 形态 | 一句话 |
 | --- | --- | --- | --- |
 | [**记忆**](memory/) | `dsh-memory` 0.3.1 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；全局索引注入 `AGENTS.md` 托管区块、**工作区索引注入工作区自己的 `AGENTS.local.md`**，设置页可浏览编辑 |
-| [**桌面宠物**](pet/) | `dsh-pet` 0.1.0 | 组合包 | 浮层里的一只小家伙：5 种宠物、7 种状态，随皮肤换色、随 Agent 干活换表情 |
+| [**桌面宠物**](pet/) | `dsh-pet` 0.1.0 | 普通包 | 浮层里的一只小家伙：5 种宠物、7 种状态，随皮肤换色、随 Agent 干活换表情 |
 | [**皮肤**](skins/) | `dsh-skins` 1.0.0 | 普通包 | 叠加在浅/深主题上的 7 套配色层（青花瓷 / 东京夜 / 水墨 / 青绿山水 / 卡布奇诺 / 中国风 / 莫兰迪），字体一起换 |
 | [**系统状态**](sysmon/) | `dsh-sysmon` 1.0.0 | 普通包 | 侧栏底部一排圆环：CPU / 内存 / 磁盘 IO / 双显卡（窄侧栏收敛成单个 CPU 环） |
 | [**Token 统计**](token-stats/) | `dsh-token-stats` 0.1.0 | 普通包 | 解析会话日志 `usage`：活跃度热力图 + 每日趋势 + 模型用量环形图 |
-| [**拓展包**](style-extras/) | `dsh-style-extras` 1.0.0 | 组合包 | 把**五个**成员（皮肤 / 系统状态 / Token 统计 / 临时提问 / 消息撤回编辑）收进一张卡片统一启停 |
+| [**拓展包**](style-extras/) | `dsh-style-extras` 1.0.0 | 组合包 | 把**六个**成员（皮肤 / 系统状态 / Token 统计 / 桌面宠物 / 临时提问 / 消息撤回编辑）收进一张卡片统一启停 |
 | [**临时提问**](btw/) | `dsh-btw` 0.1.0 | 普通包 | 右侧栏「开始」页的 `/btw` 卡片：答案不进历史、没有工具、退出即消失 |
 | [**消息撤回 / 编辑**](message-edit/) | `dsh-message-edit` 0.1.0 | 普通包 | 已发送的用户消息可以**撤回**和**编辑**：原生操作行加两个图标钮，编辑态在原气泡位置无缝覆盖 |
 | [**Agent Teams Plus**](agent-team-plus/) | `@local/dsh-agent-team-plus` 0.2.0-rc.2.1 | 组合包 | 官方 Agent Teams 的 fork：成员上限 8 → 16，新增 `release_teammate`（成员散伙腾坑、可再雇新） |
 
 > 「组合包」= 自带 `dsh.bundle.patch`，在侧栏「插件」页里有独立卡片；「普通包」= 只有加载行，
-> 由 profile 的 patch 或某个组合包声明（本仓库里 `skins` / `sysmon` / `token-stats` / `btw` /
-> `message-edit` 都由 `dsh-style-extras` 声明，所以它们在插件页里是同一张卡片下的成员行）。
+> 由 profile 的 patch 或某个组合包声明（本仓库里 `skins` / `sysmon` / `token-stats` / `pet` /
+> `btw` / `message-edit` 都由 `dsh-style-extras` 声明，所以它们在插件页里是同一张卡片下的成员行）。
 
 ---
 
@@ -61,16 +61,17 @@ plugin_manager → install_bundle → target: "C:\Users\<你>\.dsh\plugins-git\m
 ```
 
 `install_bundle` 会**自动写好** profile 的两处声明：`dependencies` 里的 `link:` 与
-`dsh.profile.bundles` 里的包名。组合包（memory / pet / style-extras / agent-team-plus）
+`dsh.profile.bundles` 里的包名。组合包（memory / style-extras / agent-team-plus）
 装完即出现在「插件」页。
 
-⚠️ 装 `style-extras` 时**五个成员包也要 link 进 profile**（它的 patch 只声明加载行，
+⚠️ 装 `style-extras` 时**六个成员包也要 link 进 profile**（它的 patch 只声明加载行，
 不提供包本体）：
 
 ```
 plugin_manager → install_bundle → ...\skins
 plugin_manager → install_bundle → ...\sysmon
 plugin_manager → install_bundle → ...\token-stats
+plugin_manager → install_bundle → ...\pet
 plugin_manager → install_bundle → ...\btw
 plugin_manager → install_bundle → ...\message-edit
 plugin_manager → install_bundle → ...\style-extras
@@ -165,7 +166,7 @@ cd <包目录>; npm test          # 有 test 脚本的包
 | --- | --- | --- |
 | <img src="docs/shots/pet-overlay.jpg" width="420"> | <img src="docs/shots/pet-overlay-detail.jpg" width="210"> | <img src="docs/shots/pet-bubble.jpg" width="210"> |
 
-| 设置里的宠物行 | 插件页卡片 |
+| 设置里的宠物行 | 插件页卡片（现已并入「拓展包」，改成那张卡片里的一行） |
 | --- | --- |
 | <img src="docs/shots/pet-settings.jpg" width="620"> | <img src="docs/shots/pet-card.jpg" width="620"> |
 
@@ -213,13 +214,13 @@ cd <包目录>; npm test          # 有 test 脚本的包
 ### 拓展包 `dsh-style-extras`
 
 纯组合包，自己不注册任何工具 / 服务 / 面板，只贡献一份 patch：把**皮肤**、**系统状态**、
-**Token 统计**、**临时提问**、**消息撤回 / 编辑**收进插件页里的**一张卡片**，点进去是**五行成员**，
-各自带开关与「运行中」状态；停用整张卡片＝五行一起停。五个成员包仍是独立的包，装它时也要一并
-link 进 profile（成员包自己不带 `dsh.bundle`，加载行只由这张 patch 声明，避免同 id 插两次）。
+**Token 统计**、**桌面宠物**、**临时提问**、**消息撤回 / 编辑**收进插件页里的**一张卡片**，点进去是
+**六行成员**，各自带开关与「运行中」状态；停用整张卡片＝六行一起停。六个成员包仍是独立的包，
+装它时也要一并 link 进 profile（成员包自己不带 `dsh.bundle`，加载行只由这张 patch 声明，避免同 id 插两次）。
 
 | <img src="docs/shots/style-extras-card.jpg" width="820"> |
 | --- |
-| 插件页里点开「拓展包」（截图拍于三成员时期：Token 用量统计 / 系统状态 / 皮肤；现在还有「临时提问」「消息撤回 / 编辑」两行） |
+| 插件页里点开「拓展包」（截图拍于三成员时期：Token 用量统计 / 系统状态 / 皮肤；现在还有「桌面宠物」「临时提问」「消息撤回 / 编辑」三行） |
 
 ### 临时提问 `dsh-btw`
 
@@ -294,7 +295,7 @@ link 进 profile（成员包自己不带 `dsh.bundle`，加载行只由这张 pa
 ```
 dsh-plugins/
 ├── memory/              dsh-memory         组合包：长期记忆 + 4 个工具 + 设置页
-├── pet/                 dsh-pet            组合包：桌面宠物浮层
+├── pet/                 dsh-pet            普通包：桌面宠物浮层
 ├── skins/               dsh-skins          普通包：7 套皮肤 token 层
 ├── sysmon/              dsh-sysmon         普通包：侧栏圆环（CPU / 内存 / 磁盘 / 双显卡）
 ├── token-stats/         dsh-token-stats    普通包：Token 用量报表
@@ -351,7 +352,7 @@ self-check scripts and hard-won gotchas:
 `dsh-skins` (7 colour skins layered over the built-in light/dark themes) ·
 `dsh-sysmon` (CPU ring + system panel) ·
 `dsh-token-stats` (token usage heatmap / trend / model donut) ·
-`dsh-style-extras` (bundle card for skins + sysmon + token-stats + btw + message-edit) ·
+`dsh-style-extras` (bundle card for skins + sysmon + token-stats + pet + btw + message-edit) ·
 `dsh-btw` (side-question card; answers never enter the transcript, no tools) ·
 `dsh-message-edit` (retract / edit already-sent user messages; in-place native editor) ·
 `dsh-agent-team-plus` (fork of the official Agent Teams with a member cap of 16 and a
