@@ -900,35 +900,83 @@ window.__ModuleLoader__.load({
        * （200ms/500ms/1s/2s/4s，共 ~7.7s 后放弃——此时界面仍由官方渲染，功能不残）。
        */
       let registration = null
+      /** 注册时所用官方条目的指纹：只有它变了才值得重注册。 */
+      let registeredSignature = null
+      const signatureOf = (entry) => entry === undefined
+        ? null
+        : `${String(entry.locale)}|${typeof entry.inject}|${entry.component === undefined ? 'none' : 'some'}`
       const disposeRegistration = () => {
         if (registration === null) return
         const dispose = registration
         registration = null
-        dispose()
+        registeredSignature = null
+        try {
+          dispose()
+        } catch (error) {
+          report('dispose', error)
+        }
       }
       const tryRegisterUser = () => {
         if (registration !== null) return true
         const official = resolveEntry('user')
         if (official === undefined) return false
-        registration = register('user', makeUserShadow(resolveOriginal))
+        try {
+          registration = register('user', makeUserShadow(resolveOriginal))
+        } catch (error) {
+          // ⚠️ 2026-10-11 真事故：这里的异常**绝不能抛回调用方**——它跑在客户端 boot /
+          // 事件分发路径上，一次 "keyed slot … already has an entry for key user at
+          // priority -999" 会连带让同一批次的官方 entry 激活失败（当时崩的是
+          // ui-goal / ui-workflow-run / ui-user-questions，桌面端直接起不来）。
+          registration = null
+          report('register', error)
+          return false
+        }
+        registeredSignature = signatureOf(official)
         report('ready-late', new Error(
-          'v=15 registered user shadow;' +
+          'v=16 registered user shadow;' +
           ` officialLocale=${String(official.locale)} officialInject=${typeof official.inject}`,
         ))
         return true
       }
-
-      // 官方账本一变（自己的条目、别的插件注册、热更替换都算）就重解析官方条目，
-      // 保证遮蔽条永远带着最新的 locale / inject。
+      /**
+       * 官方账本变了 → 只在**官方条目本身**换了（locale / inject / component 变了）时才重注册，
+       * 而且必须挪到下一拍执行。
+       *
+       * 两个坑都在这里：
+       *  1. **自触发**：我们自己 register 也会发 slots/changed；不加"指纹没变就返回"，
+       *     就会在自己触发的这一轮里反复注销重建；
+       *  2. **同轮重注册**：同一轮事件里 dispose 之后立刻 register，slot core 仍认为
+       *     同 key 同优先级已存在（dispose 要等这一轮结束才生效）→ 抛 already has an entry。
+       */
+      const refreshRegistration = () => {
+        const official = resolveEntry('user')
+        if (official === undefined) return
+        if (registration !== null && signatureOf(official) === registeredSignature) return
+        disposeRegistration()
+        window.setTimeout(() => {
+          try {
+            tryRegisterUser()
+          } catch (error) {
+            report('late-register', error)
+          }
+        }, 0)
+      }
       ctx.effect(() => ctx.on('slots/changed', (key) => {
         if (key !== SLOT) return
-        disposeRegistration()
-        tryRegisterUser()
+        try {
+          refreshRegistration()
+        } catch (error) {
+          report('slots-changed', error)
+        }
       }))
 
       ctx.slots.inject(SLOT, () => {
-        tryRegisterUser()
-        // 首次兜底：抢在事件之前跑完 apply 时，条目可能还差一拍。
+        try {
+          tryRegisterUser()
+        } catch (error) {
+          report('inject-register', error)
+        }
+        // 首次兜底：抢在事件之前跑完 apply 时，官方条目可能还差一拍。
         let attempt = 0
         const delays = [200, 500, 1000, 2000, 4000]
         let timer = null
@@ -936,7 +984,13 @@ window.__ModuleLoader__.load({
           if (registration !== null || attempt >= delays.length) return
           timer = window.setTimeout(() => {
             timer = null
-            if (tryRegisterUser()) return
+            let ok = false
+            try {
+              ok = tryRegisterUser()
+            } catch (error) {
+              report('retry-register', error)
+            }
+            if (ok) return
             attempt += 1
             schedule()
           }, delays[attempt])
@@ -960,7 +1014,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=15 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=16 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))

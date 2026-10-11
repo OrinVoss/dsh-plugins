@@ -70,6 +70,8 @@ check('编辑态复用原气泡实测盒子', /measureBubbleBox/.test(client) &&
 check('遮蔽占位节点走官方「上下文」注入行（form=notice + summary）', /form: 'notice', summary: RECALL_NOTICE\[action\]/.test(host) && /const RECALL_NOTICE = \{/.test(host))
 check('遮蔽占位节点不被整轮隐藏（它是用户唯一能看到"这里被撤回"的地方）', /data-me-mask/.test(client) && /querySelector\('\[data-context-source\]'\)/.test(client) && /isRecallMask/.test(client))
 check('官方条目没进账本时绝不注册遮蔽条（注册了会被让位 → 按钮消失）', /const tryRegisterUser = \(\) =>/.test(client) && /if \(official === undefined\) return false/.test(client) && !/ctx\.slots\.inject\(SLOT, \(\) => register\('user'/.test(client))
+check('slots/changed 不得自触发重注册（同轮 dispose+register 会抛 already has an entry）', /registeredSignature/.test(client) && /if \(registration !== null && signatureOf\(official\) === registeredSignature\) return/.test(client) && /window\.setTimeout\(\(\) => \{\n\s+try \{\n\s+tryRegisterUser\(\)/.test(client))
+check('注册异常绝不抛回 boot 路径（抛一次会连带 3 个官方 entry 激活失败）', /report\('register', error\)/.test(client) && /report\('slots-changed', error\)/.test(client) && /report\('inject-register', error\)/.test(client))
 check('用官方 slots/changed 事件等官方条目（不靠启动顺序、不靠轮询）', /ctx\.on\('slots\/changed'/.test(client) && /ctx\.effect\(\(\) => ctx\.on\('slots\/changed'/.test(client))
 check('包装层不改变官方宽度基准（.me-root 必须是块级，不能 flex 收缩）', /me-root\{position:relative;display:block;width:100%/.test(client) && !/me-root\{position:relative;display:flex/.test(client))
 check('✓/✕ 不进盒子（盒子高度==气泡高度）', /me-editor-actions\{position:absolute;right:0;top:calc\(100% \+ 4px\)/.test(client))
