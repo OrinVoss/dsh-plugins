@@ -130,6 +130,7 @@ function applyInner(ctx, config) {
     dshHome: cfg.dshHome,
     agentsPath: cfg.agentsPath,
     maxBlockBytes: cfg.maxBlockBytes,
+    briefInIndex: cfg.briefInIndex,
     autoCommit: cfg.autoCommit,
     injectProjectBlock: cfg.injectProjectBlock,
     projectBlockFile: cfg.projectBlockFile,
@@ -173,6 +174,12 @@ function applyInner(ctx, config) {
           type: 'string',
           description: '一句话摘要（≤80 字），会出现在索引条目里；这句话决定以后能不能被检索到'
         },
+        brief: {
+          type: 'string',
+          description:
+            '注入块的压缩摘要：≤12 个汉字（不是截断，是把摘要重写成一句更短的关键提示，如「代理 10808 + 工具路径权威条」）。' +
+            '注入时每条只显示它，完整 description 仍用于检索与详情。省略则沿用条目里已有的 brief。'
+        },
         type: {
           type: 'string',
           enum: ENTRY_TYPES,
@@ -196,6 +203,7 @@ function applyInner(ctx, config) {
           name: args.name,
           title: args.title,
           description: args.description,
+          brief: args.brief,
           type: args.type,
           section: args.section,
           body: args.body,

@@ -225,6 +225,14 @@ check('参数里所有 enum 值都合法', () => {
   assert.ok(tool('memory_write').parameters.properties.type.enum.includes('reference'))
 })
 
+check('memory_write 有可选 brief 参数（注入块压缩摘要，≤12 字），且不是必填', () => {
+  const brief = tool('memory_write').parameters.properties.brief
+  assert.ok(brief, 'memory_write 应暴露 brief 参数')
+  assert.equal(brief.type, 'string')
+  assert.ok(/12/.test(brief.description), 'brief 的描述里要写明 12 字上限')
+  assert.equal(tool('memory_write').parameters.required.includes('brief'), false, 'brief 必须可选')
+})
+
 check('inject 声明了 tools、且没有多余依赖', () => {
   assert.deepEqual(host.inject, ['tools'])
   assert.equal(host.name, 'dsh-memory')

@@ -667,6 +667,9 @@ window.__ModuleLoader__.load({
           }
         }, [confirming, run])
 
+        // 兜底：没有官方组件就不要渲染任何东西（模块加载顺序异常时，官方渲染器还在）。
+        if (Original === undefined) return null
+
         // 遮蔽占位节点：只让官方把它渲染成「上下文」注入行，不加任何按钮/编辑态。
         if (isRecallMask) {
           return React.createElement('div', {
@@ -882,7 +885,122 @@ window.__ModuleLoader__.load({
         }, component)
       }
 
-      ctx.slots.inject(SLOT, () => register('user', makeUserShadow(resolveOriginal)))
+      /**
+       * 遮蔽条**必须等官方条目进账本之后再注册**。
+       *
+       * 2026-10-11 重启后实测：apply 时 `ctx.slots.entries` 还是空的（captured=0 /
+       * officialUser=none，因为我们的客户端半边先于 ui-chat 半边执行）。这时注册出来的
+       * 遮蔽条没有复制官方 locale → 官方组件渲染时抛 `t is not a function` →
+       * slot core 让位(abdicate) → 界面正常但**按钮不出现**，看起来像"插件没启动成功"。
+       *
+       * 根治法：拿不到官方条目就**绝不注册**；等官方事件 `slots/changed(key)`
+       * （"Slot declaration or entry registration set changed"）通知账本变了再解析注册。
+       * 事件是官方给的、确定性的，不依赖启动顺序，也不靠超时轮询。
+       * 兜底：inject 首次回调里先试一次；万一事件早于条目可见，再补几次有限延后重试
+       * （200ms/500ms/1s/2s/4s，共 ~7.7s 后放弃——此时界面仍由官方渲染，功能不残）。
+       */
+      let registration = null
+      /** 注册时所用官方条目的指纹：只有它变了才值得重注册。 */
+      let registeredSignature = null
+      const signatureOf = (entry) => entry === undefined
+        ? null
+        : `${String(entry.locale)}|${typeof entry.inject}|${entry.component === undefined ? 'none' : 'some'}`
+      const disposeRegistration = () => {
+        if (registration === null) return
+        const dispose = registration
+        registration = null
+        registeredSignature = null
+        try {
+          dispose()
+        } catch (error) {
+          report('dispose', error)
+        }
+      }
+      const tryRegisterUser = () => {
+        if (registration !== null) return true
+        const official = resolveEntry('user')
+        if (official === undefined) return false
+        try {
+          registration = register('user', makeUserShadow(resolveOriginal))
+        } catch (error) {
+          // ⚠️ 2026-10-11 真事故：这里的异常**绝不能抛回调用方**——它跑在客户端 boot /
+          // 事件分发路径上，一次 "keyed slot … already has an entry for key user at
+          // priority -999" 会连带让同一批次的官方 entry 激活失败（当时崩的是
+          // ui-goal / ui-workflow-run / ui-user-questions，桌面端直接起不来）。
+          registration = null
+          report('register', error)
+          return false
+        }
+        registeredSignature = signatureOf(official)
+        report('ready-late', new Error(
+          'v=16 registered user shadow;' +
+          ` officialLocale=${String(official.locale)} officialInject=${typeof official.inject}`,
+        ))
+        return true
+      }
+      /**
+       * 官方账本变了 → 只在**官方条目本身**换了（locale / inject / component 变了）时才重注册，
+       * 而且必须挪到下一拍执行。
+       *
+       * 两个坑都在这里：
+       *  1. **自触发**：我们自己 register 也会发 slots/changed；不加"指纹没变就返回"，
+       *     就会在自己触发的这一轮里反复注销重建；
+       *  2. **同轮重注册**：同一轮事件里 dispose 之后立刻 register，slot core 仍认为
+       *     同 key 同优先级已存在（dispose 要等这一轮结束才生效）→ 抛 already has an entry。
+       */
+      const refreshRegistration = () => {
+        const official = resolveEntry('user')
+        if (official === undefined) return
+        if (registration !== null && signatureOf(official) === registeredSignature) return
+        disposeRegistration()
+        window.setTimeout(() => {
+          try {
+            tryRegisterUser()
+          } catch (error) {
+            report('late-register', error)
+          }
+        }, 0)
+      }
+      ctx.effect(() => ctx.on('slots/changed', (key) => {
+        if (key !== SLOT) return
+        try {
+          refreshRegistration()
+        } catch (error) {
+          report('slots-changed', error)
+        }
+      }))
+
+      ctx.slots.inject(SLOT, () => {
+        try {
+          tryRegisterUser()
+        } catch (error) {
+          report('inject-register', error)
+        }
+        // 首次兜底：抢在事件之前跑完 apply 时，官方条目可能还差一拍。
+        let attempt = 0
+        const delays = [200, 500, 1000, 2000, 4000]
+        let timer = null
+        const schedule = () => {
+          if (registration !== null || attempt >= delays.length) return
+          timer = window.setTimeout(() => {
+            timer = null
+            let ok = false
+            try {
+              ok = tryRegisterUser()
+            } catch (error) {
+              report('retry-register', error)
+            }
+            if (ok) return
+            attempt += 1
+            schedule()
+          }, delays[attempt])
+        }
+        schedule()
+        return () => {
+          if (timer !== null) window.clearTimeout(timer)
+          disposeRegistration()
+        }
+      })
 
       const probe = []
       try {
@@ -896,7 +1014,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=13 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=16 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))

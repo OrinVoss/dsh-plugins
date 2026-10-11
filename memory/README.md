@@ -225,6 +225,7 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `syncOnStartup` | `true` | 插件加载时先同步一次 |
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
 | `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
+| `briefInIndex` | `true` | 注入块里每条只渲染 `brief`（≤12 字压缩摘要，见 §12.2）。`false` 则用完整 `description` 摘要（一行回滚开关） |
 | `autoCommit` | `true` | 落盘后把记忆库**本地提交**一次（`git add -A && git commit`，**从不 push**）。home 不是 git 仓库时静默跳过；任何 git 失败都吞掉、不影响记忆写入。stdio 用 `ignore`（沙箱下管道捕获子进程输出会 EPERM）。设 `false` 关掉 |
 
 ## 6. 从 Z code 导入已有记忆
@@ -497,6 +498,23 @@ This file changed after it was loaded. Use the following content instead of the 
 - **关掉**：`injectProjectBlock: false`。
 - **测试注意**：假 session 的 cwd 必须是临时目录——用真实工作区路径会把测试夹具写进开发者的仓库
   （2026-10-09 真漏过一次，`plugintest.cjs` / `selfcheck.cjs` 已改用 `mkdtemp`）。
+
+### 12.2 压缩摘要 `brief`（2026-10-11 新增）
+
+**问题**：全局索引按「每条一行：标题 + description 摘要」注入。条目长到 105 条时区块 **29,293B**，
+而预算 `maxBlockBytes` = 32768 —— **余量只剩 10%**，再写十几条就会从末尾静默截断（最糟的丢信息方式）。
+
+**做法**：每个条目加一个 `brief` = **≤12 个汉字的压缩摘要**（**不是截断，是重写**，如 `代理 10808 + 工具路径权威条`）。
+注入块渲染 `brief`；完整 `description` 原样保留，检索命中 / 详情页 / 索引文件里看到的仍是它。
+
+- **写入**：`memory_write` 新增可选参数 `brief`；未给则沿用条目里已有的（普通更新不会把 brief 抹掉）
+- **渲染**：`store.buildBlock` 走 `entryLine()` —— 有 `brief` 用它，没有退回 `description`；`briefInIndex: false` 全局回退
+- **校验**：`lintmemory.cjs` 要求**全局条目**都有 `brief`、≤12 汉字且 ≤26 字符、不折行（项目条目可缺，项目块本身很小）
+- **实测**：**29,293B → 18,151B（−38%）**，估算 token 9,083 → 5,550；预算余量 10% → 45%
+
+**为什么不是「把摘要截断」**：截断会留半句话（`本机代理 127.0.0.1:10808 与各包管…`），价值低于重写。
+**为什么不是「只留标题」**：会丢掉「哪条才是权威条」这类判断信息——2026-10-09 的「专题地图」就是因为丢掉逐条信息被否的。
+**代价**：`brief` 要写一次（105 条那次是人工压缩的）；之后新增条目时 `memory_write` 带上 `brief` 即可。
 
 ## 13. 自动提交（`autoCommit`）
 

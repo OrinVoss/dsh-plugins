@@ -11,6 +11,9 @@
       name: dsh-memory
       config:
         maxBlockBytes: 32768
+        # 注入块里每条只渲染 brief（≤12 字压缩摘要）：区块 29KB→18KB，离预算上限的余量从 10% 变成 45%。
+        # 关掉（false）退回完整 description 摘要 —— 一行回滚开关。见 README §12.2
+        briefInIndex: true
         autoCommit: true
         # 工作区记忆区块：写进会话工作区自己的指令文件（DSH 会读 AGENTS.md / AGENTS.local.md）。
         # 默认 AGENTS.local.md —— 独立生效，且按惯例不进版本控制；想让它进仓库就改成 AGENTS.md。

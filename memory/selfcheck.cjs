@@ -177,6 +177,39 @@ check('写入全局条目 → 文件 + frontmatter + 索引', () => {
   assert.match(idx, /- \[Git 只做本地提交\]\(preferences\/git-local-commit-only\.md\) — 只要本地 commit、不推送；每次更改都要提交/)
 })
 
+// ---------------------------------------------------------------- brief（注入块压缩摘要，2026-10-11）
+// 用**独立的临时库**：往共享夹具里写条目会污染后面按条目数统计的检查（实测踩到过）。
+check('注入块优先渲染 brief，缺失退回 description；briefInIndex:false 恒用 description', () => {
+  const briefHome = path.join(root, 'brief-home')
+  const briefStore = storeLib.createStore({ home: briefHome, agentsPath: path.join(root, 'brief-AGENTS.md'), maxBlockBytes: 20000 })
+  briefStore.write('global', {
+    name: 'tmp/briefed',
+    title: '有 brief 的条目',
+    description: '这是完整的长摘要，注入块不该渲染它',
+    brief: '压缩版提示',
+    body: '正文。'
+  }, cwd)
+  briefStore.write('global', {
+    name: 'tmp/no-brief',
+    title: '没 brief 的条目',
+    description: '没有 brief 时用的摘要',
+    body: '正文。'
+  }, cwd)
+  const block = briefStore.buildBlock(null)
+  assert.match(block, /tmp\/briefed\.md\) — 压缩版提示/)
+  assert.ok(!block.includes('这是完整的长摘要'), '有 brief 的条目不该再渲染长摘要')
+  assert.match(block, /tmp\/no-brief\.md\) — 没有 brief 时用的摘要/, '缺 brief 应退回 description')
+
+  const off = storeLib.createStore({ home: briefHome, agentsPath: path.join(root, 'brief-AGENTS.md'), maxBlockBytes: 20000, briefInIndex: false }).buildBlock(null)
+  assert.match(off, /这是完整的长摘要/, 'briefInIndex:false 应回退到完整摘要')
+
+  // 普通更新（整条重写）不带 brief 时，不能把已有 brief 抹掉
+  briefStore.write('global', { name: 'tmp/briefed', description: '换个摘要', body: '新正文。', overwrite: true }, cwd)
+  const raw = fs.readFileSync(path.join(briefHome, 'tmp', 'briefed.md'), 'utf8')
+  assert.match(raw, /^brief: 压缩版提示$/m)
+  assert.match(raw, /description: 换个摘要/)
+})
+
 check('同 section 第二条追加在既有条目之后', () => {
   store.write('global', {
     name: 'preferences/keep-readmes-in-sync',

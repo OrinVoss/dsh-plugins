@@ -179,6 +179,37 @@ check('frontmatter 的 description 不折行（插件按行解析，续行会被
   if (bad.length) throw new Error(`description 折行：\n  ${bad.join('\n  ')}`)
 })
 
+// 2026-10-11 补：brief = 注入块用的压缩摘要（≤12 汉字，不是截断而是重写成一句关键提示）。
+// 全局条目**必须**有（注入块 29KB→18KB 全靠它，缺了会静默退回长摘要、把块推回预算上限）；
+// 项目条目可缺（项目块本来就小），但有就必须满足长度。
+check('brief 齐备且 ≤12 汉字 / ≤26 字符、不折行', () => {
+  const cjk = (s) => ((s.match(/[\u4e00-\u9fa5]/g)) || []).length
+  const missing = []
+  const tooLong = []
+  const folded = []
+  let projectNoBrief = 0
+  for (const e of entries) {
+    const isProject = e.r.startsWith('projects/')
+    const lines = fs.readFileSync(e.p, 'utf8').split(/\r?\n/)
+    const bi = lines.findIndex((l, i) => i > 0 && /^brief:/.test(l))
+    if (bi === -1) {
+      if (isProject) projectNoBrief++
+      else missing.push(e.r)
+      continue
+    }
+    if (bi + 1 < lines.length && /^\s+\S/.test(lines[bi + 1])) { folded.push(e.r); continue }
+    const b = String(e.meta.brief || '').trim()
+    const n = [...b].length
+    if (!b || cjk(b) > 12 || n > 26) tooLong.push(`${e.r} → 汉字 ${cjk(b)} / 总 ${n}：${b}`)
+  }
+  const problems = []
+  if (missing.length) problems.push(`全局条目缺 brief（${missing.length} 条，注入块会退回长摘要）：\n  ${missing.join('\n  ')}`)
+  if (tooLong.length) problems.push(`brief 不合规（要 ≤12 汉字且 ≤26 字符）：\n  ${tooLong.join('\n  ')}`)
+  if (folded.length) problems.push(`brief 折行（续行会被静默吞掉）：\n  ${folded.join('\n  ')}`)
+  if (problems.length) throw new Error(problems.join('\n'))
+  process.stdout.write(`        （全局条目 brief 齐备；项目条目 ${projectNoBrief} 条未设，允许）\n`)
+})
+
 check('索引摘要与 frontmatter description 一致（同一事实不许有两套摘要）', () => {
   const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim()
   const bad = []

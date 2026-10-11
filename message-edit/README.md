@@ -238,7 +238,7 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
 
 ---
 
-## 四、真机实测攒下的四个硬坑
+## 四、真机实测攒下的五个硬坑
 
 这几条是踩完才写下来的，改这个插件时**一个字都别省**：
 
@@ -251,7 +251,27 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
 3. **找官方条目要按 `priority === 0`，不能只按 component 身份排除自己。**
    客户端热更后，上一次注册的遮蔽条可能还留在账本里，会被误认成「官方条目」。
    遮蔽优先级因此取 `-999`，压过历史遗留的 `-1`。
-4. **`sessionController.prompt(request, signal)` 的 signal 必须是真的 `AbortSignal`。**
+   `-999` 压过官方 `0` 这件事由官方 Slots inspect 实证：遮蔽生效时
+   `key=user priority=-999 active=true`、官方那条 `priority=0 active=false`。
+4. **官方条目可能比我们晚进账本：拿不到就绝不注册（2026-10-11 重启后实测）。**
+   重启桌面端后我们的客户端半边**先于** `mirror` 里的 ui-chat 半边执行，`apply` 时
+   `ctx.slots.entries` 是空的（`captured=0 officialUser=none`）。老逻辑照样注册 →
+   遮蔽条没有复制官方 `locale` → 官方组件抛错 → 条目被让位，界面一切正常但**按钮不出现**，
+   看起来就是"插件没启动成功"。
+   修法两层：
+   1. `tryRegisterUser()` 里 `official === undefined` 时**直接 return false 不注册**；
+   2. 等它的方式用**官方事件** `ctx.on('slots/changed', key => …)`
+      （官方 client Event 目录：「An ordinary Slot declaration or entry registration set changed.」）——
+      账本一变就重解析官方条目并（重）注册，**不依赖启动顺序、不靠超时、不轮询**。
+      另外留 5 次有限延后重试（200ms/500ms/1s/2s/4s）当保险：官方没有明文写"事件一定晚于条目可见"。
+   注册成功补一条 `ready-late` 报告，`GET /message-edit-api/state` 里能直接看到
+   `registered user shadow; officialLocale=chat officialInject=undefined`。
+
+   ⚠️ 生效前提：**客户端半边只在页面重载/重启桌面端时重新 apply**。实测 host 侧 HMR 改 `client.js`、
+   `touch host.js`、以及 `plugin_manager set_plugin`（入口级开关）都**不会**让客户端半边重跑，
+   入口 toggle 还会把已生效的注册变成 inactive（等于把插件弄哑）。改完客户端代码后**重启桌面端**，
+   再用 `/state` 的版本号 + 官方 Slots inspect 的 `active` 复核。
+5. **`sessionController.prompt(request, signal)` 的 signal 必须是真的 `AbortSignal`。**
    内部会调 `signal.throwIfAborted()`，传 `undefined` 会抛
    `Cannot read properties of undefined (reading 'throwIfAborted')`。
    这个坑的破坏性最大：替换已经落盘、重发却失败 → 对话被清空且没有新回答。
