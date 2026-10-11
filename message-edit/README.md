@@ -258,10 +258,19 @@ curl.exe -s -X POST http://127.0.0.1:19387/message-edit-api/selftest
    `ctx.slots.entries` 是空的（`captured=0 officialUser=none`）。老逻辑照样注册 →
    遮蔽条没有复制官方 `locale` → 官方组件抛错 → 条目被让位，界面一切正常但**按钮不出现**，
    看起来就是"插件没启动成功"。
-   修法：`tryRegisterUser()` 里 `official === undefined` 时**直接 return false 不注册**，
-   槽位服务没有 entries 变更订阅可用，所以短轮询（150ms × ≤100 次 ≈ 15s）等官方条目出现再注册；
+   修法两层：
+   1. `tryRegisterUser()` 里 `official === undefined` 时**直接 return false 不注册**；
+   2. 等它的方式用**官方事件** `ctx.on('slots/changed', key => …)`
+      （官方 client Event 目录：「An ordinary Slot declaration or entry registration set changed.」）——
+      账本一变就重解析官方条目并（重）注册，**不依赖启动顺序、不靠超时、不轮询**。
+      另外留 5 次有限延后重试（200ms/500ms/1s/2s/4s）当保险：官方没有明文写"事件一定晚于条目可见"。
    注册成功补一条 `ready-late` 报告，`GET /message-edit-api/state` 里能直接看到
-   `registered user shadow after N retries; officialLocale=chat`。
+   `registered user shadow; officialLocale=chat officialInject=undefined`。
+
+   ⚠️ 生效前提：**客户端半边只在页面重载/重启桌面端时重新 apply**。实测 host 侧 HMR 改 `client.js`、
+   `touch host.js`、以及 `plugin_manager set_plugin`（入口级开关）都**不会**让客户端半边重跑，
+   入口 toggle 还会把已生效的注册变成 inactive（等于把插件弄哑）。改完客户端代码后**重启桌面端**，
+   再用 `/state` 的版本号 + 官方 Slots inspect 的 `active` 复核。
 5. **`sessionController.prompt(request, signal)` 的 signal 必须是真的 `AbortSignal`。**
    内部会调 `signal.throwIfAborted()`，传 `undefined` 会抛
    `Cannot read properties of undefined (reading 'throwIfAborted')`。

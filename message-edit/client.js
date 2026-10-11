@@ -886,20 +886,25 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 官方条目**可能比我们晚进账本**（2026-10-11 重启后实测：apply 时 entries 为空、
-       * captured=0、officialUser=none）。老逻辑这时照样注册 → 遮蔽条没有复制官方的
-       * locale / inject → 官方组件抛 `t is not a function` → slot core 让位(abdicate)，
-       * 表现为"插件没启动成功"（编辑/撤回按钮不出现）。
-       * 所以：**拿不到官方条目就绝不注册**，等它出现再注册；注册成功补一条 ready-late。
+       * 遮蔽条**必须等官方条目进账本之后再注册**。
+       *
+       * 2026-10-11 重启后实测：apply 时 `ctx.slots.entries` 还是空的（captured=0 /
+       * officialUser=none，因为我们的客户端半边先于 ui-chat 半边执行）。这时注册出来的
+       * 遮蔽条没有复制官方 locale → 官方组件渲染时抛 `t is not a function` →
+       * slot core 让位(abdicate) → 界面正常但**按钮不出现**，看起来像"插件没启动成功"。
+       *
+       * 根治法：拿不到官方条目就**绝不注册**；等官方事件 `slots/changed(key)`
+       * （"Slot declaration or entry registration set changed"）通知账本变了再解析注册。
+       * 事件是官方给的、确定性的，不依赖启动顺序，也不靠超时轮询。
+       * 兜底：inject 首次回调里先试一次；万一事件早于条目可见，再补几次有限延后重试
+       * （200ms/500ms/1s/2s/4s，共 ~7.7s 后放弃——此时界面仍由官方渲染，功能不残）。
        */
       let registration = null
-      let retryTimer = null
-      let retryCount = 0
-      const stopRetry = () => {
-        if (retryTimer !== null) {
-          window.clearInterval(retryTimer)
-          retryTimer = null
-        }
+      const disposeRegistration = () => {
+        if (registration === null) return
+        const dispose = registration
+        registration = null
+        dispose()
       }
       const tryRegisterUser = () => {
         if (registration !== null) return true
@@ -907,29 +912,39 @@ window.__ModuleLoader__.load({
         if (official === undefined) return false
         registration = register('user', makeUserShadow(resolveOriginal))
         report('ready-late', new Error(
-          `v=14 registered user shadow after ${retryCount} retries;` +
+          'v=15 registered user shadow;' +
           ` officialLocale=${String(official.locale)} officialInject=${typeof official.inject}`,
         ))
         return true
       }
 
+      // 官方账本一变（自己的条目、别的插件注册、热更替换都算）就重解析官方条目，
+      // 保证遮蔽条永远带着最新的 locale / inject。
+      ctx.effect(() => ctx.on('slots/changed', (key) => {
+        if (key !== SLOT) return
+        disposeRegistration()
+        tryRegisterUser()
+      }))
+
       ctx.slots.inject(SLOT, () => {
-        stopRetry()
-        retryCount = 0
-        if (!tryRegisterUser()) {
-          // 槽位服务没有 entries 变更订阅可用，只能短轮询（最多 ~15s）等官方条目。
-          retryTimer = window.setInterval(() => {
-            retryCount += 1
-            if (tryRegisterUser() || retryCount > 100) stopRetry()
-          }, 150)
+        tryRegisterUser()
+        // 首次兜底：抢在事件之前跑完 apply 时，条目可能还差一拍。
+        let attempt = 0
+        const delays = [200, 500, 1000, 2000, 4000]
+        let timer = null
+        const schedule = () => {
+          if (registration !== null || attempt >= delays.length) return
+          timer = window.setTimeout(() => {
+            timer = null
+            if (tryRegisterUser()) return
+            attempt += 1
+            schedule()
+          }, delays[attempt])
         }
+        schedule()
         return () => {
-          stopRetry()
-          if (registration !== null) {
-            const dispose = registration
-            registration = null
-            dispose()
-          }
+          if (timer !== null) window.clearTimeout(timer)
+          disposeRegistration()
         }
       })
 
@@ -945,7 +960,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=14 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=15 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))
