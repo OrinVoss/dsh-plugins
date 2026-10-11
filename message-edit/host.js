@@ -55,6 +55,17 @@ const MARK = 'dsh-recall:'
 const RECALL_SOURCE = 'message-edit'
 
 /** 遮蔽节点对模型可见的占位文本（user/message 一定会投影成消息）。 */
+/**
+ * 遮蔽节点的折叠摘要。官方 Chat 的注入行（ContextInjectionRow）在 source 上读
+ * `form`（已知取值："instructions" / "catalog" / "snapshot" / "notice" / "relay" / "recall"）
+ * 和 notice 形态的 `summary`：form 不写只会退化成一层"opaque"原始文本，写了 notice + summary
+ * 就能在**折叠状态**下讲清发生了什么（这才是原生注入行的样子）。
+ */
+const RECALL_NOTICE = {
+  retract: '已撤回这条消息及其之后的对话，不再进入模型上下文',
+  edit: '已改写这条消息，并从这条起重新生成',
+}
+
 const RECALL_TEXT = {
   retract: '（用户撤回了一段对话，其中内容已不再可见，请不要再引用它。）',
   edit: '（用户撤回并改写了下面这条消息。）',
@@ -317,7 +328,7 @@ module.exports = {
         {
           id: `${MARK}${randomUUID()}`,
           role: 'user',
-          source: { kind: RECALL_SOURCE, form: action },
+          source: { kind: RECALL_SOURCE, form: 'notice', summary: RECALL_NOTICE[action] },
           content: [{ type: 'text', text: RECALL_TEXT[action] }],
         },
         { surfaceOp: { op: 'replace', startSeq: seq, endSeq }, sourceEventSeqs: shadowed },
@@ -542,7 +553,7 @@ module.exports = {
           const cut = session.append('user/message', {
             id: `${MARK}${randomUUID()}`,
             role: 'user',
-            source: { kind: RECALL_SOURCE, form: 'retract' },
+            source: { kind: RECALL_SOURCE, form: 'notice', summary: RECALL_NOTICE.retract },
             content: [{ type: 'text', text: RECALL_TEXT.retract }],
           }, { surfaceOp: { op: 'replace', startSeq: u2.seq, endSeq: nodes[nodes.length - 1] }, sourceEventSeqs: shadowed })
           step('replace', { cutSeq: cut.seq, startSeq: u2.seq, shadowed, type: cut.type })

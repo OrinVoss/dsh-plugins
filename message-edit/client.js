@@ -41,6 +41,8 @@ window.__ModuleLoader__.load({
     const API = '/message-edit-api'
     const SLOT = 'conversation.chat.node'
     const HIDDEN_ATTR = 'data-msg-edit-hidden'
+    /** 遮蔽节点（撤回/编辑占位）的 source.kind，与宿主侧 RECALL_SOURCE 一致。 */
+    const RECALL_KIND = 'message-edit'
     const ROW_SELECTOR = '[data-chat-flow-key]'
     /** 退出编辑的动画时长；必须与 CSS 里 `me-edit-morph-out` 的时长一致。 */
     const CLOSE_MS = 150
@@ -76,7 +78,14 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 [${HIDDEN_ATTR}]{display:none!important}
-.me-root{position:relative;display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:100%;min-width:0}
+/*
+ * 包装层必须是**普通块**，不能是 flex：官方 .userStack 的
+ * max-width:min(calc(--dsh-chat-content-width * .702), 82%) 里那 82% 是相对
+ * .userRow 的宽度算的。一旦把 .userRow 变成 align-items:flex-end 下的 flex item，
+ * 它就收缩到内容宽，82% 的基准随之变小 —— 同一句话会比原生更早换行（2026-10-11 用户截图：
+ * 同一条消息一条一行、一条两行）。我们的按钮/编辑框/确认气泡全是绝对定位，不需要 flex。
+ */
+.me-root{position:relative;display:block;width:100%;min-width:0}
 /*
  * 操作行落在**原生操作行内部**：官方 MessageIconActions 的 extraActions 就排在这两个位置
  * （复制键之后、同样 gap 8、同样 28px+delta 的方钮）。气泡那侧的调用点没传 extraActions，
@@ -96,7 +105,7 @@ window.__ModuleLoader__.load({
  * 所以此时把插进原生操作行的那两个按钮收起来，并撤掉为它们预留的 padding-right。
  */
 .me-root[data-editing="1"] .me-actions{display:none}
-.me-root[data-editing="1"] [data-clock="start"]{padding-right:0}
+.me-root[data-editing="1"] [data-clock="start"]{padding-right:0;visibility:hidden}
 /*
  * 过渡动画：气泡的蓝色填充 → 白底、无边框 → 蓝描线，再让 ✓/× 稍微后一步淡入。
  * 刻意**不做透明度/缩放**：编辑器的字号、行高、内边距与气泡逐项对齐（10px 16px 内容盒），
@@ -130,19 +139,27 @@ window.__ModuleLoader__.load({
  * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
  * 几何由内联样式给出（实测原气泡的 top/left/宽/最小高），所以整块不位移不跳尺寸。
  */
-.me-editor{box-sizing:border-box;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);
+.me-editor{box-sizing:border-box;max-width:100%;
   background:var(--dsw-alias-bg-base,#fff);
   border:1px solid var(--dsw-alias-state-business-primary,#4d6bfe);
   border-radius:var(--dsw-radius-xl);
   padding:9px 15px;color:var(--dsw-alias-label-primary);
   font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));
-  display:flex;flex-direction:column;gap:6px}
+  display:flex;flex-direction:column}
 .me-editor-input{box-sizing:border-box;width:100%;margin:0;padding:0;
   min-height:calc(22px + var(--dsh-content-font-delta,0px));max-height:40vh;overflow-y:auto;resize:none;
   background:0 0;border:0;outline:none;color:inherit;font:inherit;line-height:inherit;
   white-space:pre-wrap;word-break:break-word}
 .me-editor-input::placeholder{color:var(--dsw-alias-label-tertiary)}
-.me-editor-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+/*
+ * ✓/✕ **不进盒子**：绝对定位到盒子下方（正好是官方操作行那一行）。
+ * 这一行曾经在盒子里占高度，导致编辑框永远比原气泡高一行——用户看到的
+ * "编辑框没贴合气泡"就是这个：底部多悬出来一条。
+ * 现在盒子的高度 = max(实测气泡高, 文字高+上下内边距)，初始状态下与气泡**完全相等**；
+ * 用户继续打字时盒子向下长，按钮跟着往下走。
+ */
+.me-editor-actions{position:absolute;right:0;top:calc(100% + 4px);
+  display:flex;align-items:center;justify-content:flex-end;gap:8px;
   height:calc(28px + var(--dsh-content-font-delta,0px))}
 /* 方钮几何抄官方 xD_KDq_action：28px+delta、radius-sm、label-tertiary、hover 换色、图标 15px+delta */
 .me-icon{box-sizing:border-box;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));
@@ -310,6 +327,17 @@ window.__ModuleLoader__.load({
         if (first !== -1 && index >= first && index <= last) row.setAttribute(HIDDEN_ATTR, '1')
         else row.removeAttribute(HIDDEN_ATTR)
       })
+      // 例外：**撤回/编辑的占位节点必须留着**。官方把它渲染成「上下文」注入行
+      // （conversation.chat.node 里 kind !== 'user' 的 user/message 都走 ContextInjectionRow，
+      // 折叠摘要取 source.summary）——它就是用户唯一能看到"这里被撤回了"的地方；
+      // 而它和它遮蔽的消息同属一轮，不加例外会被整轮藏掉（2026-10-11 用户反馈）。
+      // 识别优先看自己打的标记，其次看官方注入行的 producer 标签（= source.kind）。
+      rows.forEach((row) => {
+        const tagged = row.querySelector('[data-context-source]')
+        const isMask = row.querySelector('[data-me-mask="1"]') !== null
+          || (tagged !== null && (tagged.textContent || '').trim() === RECALL_KIND)
+        if (isMask) row.removeAttribute(HIDDEN_ATTR)
+      })
     }
 
     // ------------------------------------------------------------------ 组件
@@ -410,6 +438,9 @@ window.__ModuleLoader__.load({
         const [placement, setPlacement] = React.useState('below')
         const confirmRef = React.useRef(null)
         const originalText = React.useMemo(() => textOf(data), [data])
+        // 这个节点是不是本插件写下的遮蔽占位（撤回/编辑）？
+        const isRecallMask = data.source !== null && typeof data.source === 'object'
+          && data.source.kind === RECALL_KIND
         const inputRef = React.useRef(null)
 
         // 与官方 QueueEditor 同款：随内容自增高，长到 CSS 上限（40vh）后自己滚。
@@ -636,6 +667,15 @@ window.__ModuleLoader__.load({
           }
         }, [confirming, run])
 
+        // 遮蔽占位节点：只让官方把它渲染成「上下文」注入行，不加任何按钮/编辑态。
+        if (isRecallMask) {
+          return React.createElement('div', {
+            ref: rootRef,
+            'data-me-mask': '1',
+            style: { display: 'contents' },
+          }, Original === undefined ? null : React.createElement(Original, props))
+        }
+
         if (editing) {
           // **无缝**：官方消息本体照常渲染（所以上面的图片/附件/引用摘要一个都不丢），
           // 编辑框用实测盒子**原位覆盖**在文字气泡上（白底 + 蓝描线），
@@ -856,7 +896,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=10 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=13 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))

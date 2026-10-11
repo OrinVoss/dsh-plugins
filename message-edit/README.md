@@ -32,6 +32,12 @@
 - **无缝**：编辑时官方消息本体照常渲染（所以附件不丢），编辑器按**实测**的原气泡盒子
   `top/left/宽/最小高` 原位覆盖上去。字号、行高、内容盒内边距（10px 16px）与气泡逐项对齐，
   所以文字在编辑前后**一个像素都不动**。
+- **盒子必须严格等于气泡**（2026-10-10 真机反馈修）：`✓/✕` 那一行**不放进盒子**，而是
+  `position:absolute;top:calc(100% + 4px)` 贴到盒子下方（就是官方操作行那一行，编辑态下把
+  官方操作行 `visibility:hidden` 让位）。早先把它们放进 flex 流里，盒子就永远比气泡高一行
+  （= 一行按钮 + gap），用户看到的就是"编辑框没贴合气泡、底部多悬出一条"。
+  同时去掉 `.me-editor` 上的 `max-width` 上限——宽度以实测值为准，避免 CSS 上限（用的是
+  `--dsh-chat-content-width` 的兜底值）把盒子压窄。继续打字时盒子向下长，✓/✕ 跟着往下走。
 - **进场过渡**：160ms 的关键帧把底色从气泡蓝渐变到白、描线从透明渐显为蓝环；✓/× 再延后 70ms 淡入。
 - **退场过渡**：点 ×（或 `Esc`）不会立刻卸载编辑器，而是先置 `closing` 播 150ms 的**反向**关键帧
   （白底 + 蓝环 → 气泡蓝、描线消失），播完再 `setEditing(false)`。
@@ -122,6 +128,34 @@ DSH 自己的压缩同样是留一条**模型可见**的 checkpoint 消息，所
 
 隐藏用的是**遮蔽 slot 渲染器**而不是改 DOM：wrap `conversation.chat.node` 的每一种 kind，
 当 `node.location.turn.turn ∈ hiddenTurns` 时渲染 `null`——干净的 React 卸载，官方逻辑完全不受影响。
+（当前实现按行过滤：给 `[data-chat-flow-key]` 行打 `data-msg-edit-hidden` 再 `display:none`，
+并在 DOM 变化后重放。）
+
+#### ⚠️ 例外：遮蔽节点本身必须可见（2026-10-11 修正）
+
+隐藏是**按轮次**的，而遮蔽节点和被它遮蔽的消息**同属一轮**，所以占位节点一开始被一起藏掉了：
+用户只看到"这一段凭空消失"，看不到"这里被撤回了"。用户原话："每一轮上下文都有三次注入
+（AGENTS.md / runtime-context / time-context），怎么撤回之后没有注入这一条？"
+
+正解是**让官方自己渲染这一行**。官方 Chat 对 `user/message` 里 `source.kind !== 'user'` 的一律
+渲染 `ContextInjectionRow`（就是那三条「上下文」注入行的实现）：
+
+| 位置 | 取值 |
+|---|---|
+| 折叠标题 | locale `message.contextInjection`（「上下文」） |
+| 折叠摘要 | `source.summary`，**只对 `form: 'notice'` 生效**（官方 `noticeSummary()`） |
+| 展开正文 | 模型看到的那串 content（`ModelFacingContent`） |
+| producer 标签 | `source.kind`（本项目里是 `message-edit`） |
+
+所以遮蔽节点的 source 写成 `{ kind: 'message-edit', form: 'notice', summary: RECALL_NOTICE[action] }`，
+客户端只做两件事：
+
+1. 被遮蔽的轮次照常隐藏，但**豁免这一行**——按官方注入行的 `[data-context-source]` 文本（=kind）
+   或我们自己的 `data-me-mask` 标记识别；
+2. 对这一行不加编辑/撤回按钮（用 `display:contents` 包一层，官方 DOM 结构不变）。
+
+官方 `KNOWN_FORMS = ["instructions", "catalog", "snapshot", "notice", "relay", "recall"]`：
+不写 `form` 会退化成"opaque"原始文本，写 `notice` + `summary` 才能在折叠状态下读到人话。
 
 ### 5. `user` 渲染器怎么加按钮而外观不变
 
@@ -139,6 +173,13 @@ return <div className="me-root">
   <div className="me-actions">…编辑 / 撤回…</div>
 </div>
 ```
+
+⚠️ **包装层必须是普通块（`position:relative;display:block;width:100%`），不能是 flex。**
+官方 `.userStack` 的 `max-width: min(calc(--dsh-chat-content-width * .702), 82%)` 里那 82%
+是相对 `.userRow` 的宽度算的；一旦把 `.userRow` 放进 `display:flex;align-items:flex-end` 的
+包装层，它就收缩到内容宽，82% 的基准随之变小——**同一句话会比原生更早换行**
+（2026-10-11 用户截图：同一条消息一条一行、一条两行）。我们的按钮、编辑框、确认气泡全是
+绝对定位，包装层不需要 flex。
 
 ---
 
