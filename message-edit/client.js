@@ -667,6 +667,9 @@ window.__ModuleLoader__.load({
           }
         }, [confirming, run])
 
+        // 兜底：没有官方组件就不要渲染任何东西（模块加载顺序异常时，官方渲染器还在）。
+        if (Original === undefined) return null
+
         // 遮蔽占位节点：只让官方把它渲染成「上下文」注入行，不加任何按钮/编辑态。
         if (isRecallMask) {
           return React.createElement('div', {
@@ -882,7 +885,53 @@ window.__ModuleLoader__.load({
         }, component)
       }
 
-      ctx.slots.inject(SLOT, () => register('user', makeUserShadow(resolveOriginal)))
+      /**
+       * 官方条目**可能比我们晚进账本**（2026-10-11 重启后实测：apply 时 entries 为空、
+       * captured=0、officialUser=none）。老逻辑这时照样注册 → 遮蔽条没有复制官方的
+       * locale / inject → 官方组件抛 `t is not a function` → slot core 让位(abdicate)，
+       * 表现为"插件没启动成功"（编辑/撤回按钮不出现）。
+       * 所以：**拿不到官方条目就绝不注册**，等它出现再注册；注册成功补一条 ready-late。
+       */
+      let registration = null
+      let retryTimer = null
+      let retryCount = 0
+      const stopRetry = () => {
+        if (retryTimer !== null) {
+          window.clearInterval(retryTimer)
+          retryTimer = null
+        }
+      }
+      const tryRegisterUser = () => {
+        if (registration !== null) return true
+        const official = resolveEntry('user')
+        if (official === undefined) return false
+        registration = register('user', makeUserShadow(resolveOriginal))
+        report('ready-late', new Error(
+          `v=14 registered user shadow after ${retryCount} retries;` +
+          ` officialLocale=${String(official.locale)} officialInject=${typeof official.inject}`,
+        ))
+        return true
+      }
+
+      ctx.slots.inject(SLOT, () => {
+        stopRetry()
+        retryCount = 0
+        if (!tryRegisterUser()) {
+          // 槽位服务没有 entries 变更订阅可用，只能短轮询（最多 ~15s）等官方条目。
+          retryTimer = window.setInterval(() => {
+            retryCount += 1
+            if (tryRegisterUser() || retryCount > 100) stopRetry()
+          }, 150)
+        }
+        return () => {
+          stopRetry()
+          if (registration !== null) {
+            const dispose = registration
+            registration = null
+            dispose()
+          }
+        }
+      })
 
       const probe = []
       try {
@@ -896,7 +945,7 @@ window.__ModuleLoader__.load({
       }
       const official = resolveEntry('user')
       report('ready', new Error(
-        `v=13 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
+        `v=14 entries=${typeof ctx.slots.entries} captured=${captured.size} officialUser=${official === undefined ? 'none' : 'ok'}` +
         ` officialLocale=${official === undefined ? '?' : String(official.locale)}` +
         ` userEntries=[${probe.join(' | ')}]`,
       ))

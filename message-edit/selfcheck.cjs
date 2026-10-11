@@ -69,6 +69,7 @@ check('编辑态几何与气泡一致（1px 边框用内边距抵消）', /paddi
 check('编辑态复用原气泡实测盒子', /measureBubbleBox/.test(client) && /getBoundingClientRect\(\)/.test(client))
 check('遮蔽占位节点走官方「上下文」注入行（form=notice + summary）', /form: 'notice', summary: RECALL_NOTICE\[action\]/.test(host) && /const RECALL_NOTICE = \{/.test(host))
 check('遮蔽占位节点不被整轮隐藏（它是用户唯一能看到"这里被撤回"的地方）', /data-me-mask/.test(client) && /querySelector\('\[data-context-source\]'\)/.test(client) && /isRecallMask/.test(client))
+check('官方条目没进账本时绝不注册遮蔽条（注册了会被让位 → 按钮消失）', /const tryRegisterUser = \(\) =>/.test(client) && /if \(official === undefined\) return false/.test(client) && !/ctx\.slots\.inject\(SLOT, \(\) => register\('user'/.test(client))
 check('包装层不改变官方宽度基准（.me-root 必须是块级，不能 flex 收缩）', /me-root\{position:relative;display:block;width:100%/.test(client) && !/me-root\{position:relative;display:flex/.test(client))
 check('✓/✕ 不进盒子（盒子高度==气泡高度）', /me-editor-actions\{position:absolute;right:0;top:calc\(100% \+ 4px\)/.test(client))
 check('盒子宽度不被 CSS 上限压过实测值', /me-editor\{box-sizing:border-box;max-width:100%/.test(client))
