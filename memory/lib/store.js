@@ -141,7 +141,11 @@ function oneLine(value) {
 }
 
 function serializeEntry(meta, body) {
-  const lines = ['---', `name: ${oneLine(meta.name)}`, `description: ${oneLine(meta.description)}`, 'metadata:', `  node_type: memory`, `  type: ${oneLine(meta.type)}`, `  scope: ${oneLine(meta.scope)}`]
+  const lines = ['---', `name: ${oneLine(meta.name)}`, `description: ${oneLine(meta.description)}`]
+  // brief：≤12 字的压缩摘要（不是截断，是重写）。注入块优先渲染它；description 原样保留，
+  // 检索命中、详情页、索引文件里看到的仍是完整摘要。见 README §12.5
+  if (meta.brief) lines.push(`brief: ${oneLine(meta.brief)}`)
+  lines.push('metadata:', `  node_type: memory`, `  type: ${oneLine(meta.type)}`, `  scope: ${oneLine(meta.scope)}`)
   if (meta.originSessionId) lines.push(`  originSessionId: ${oneLine(meta.originSessionId)}`)
   lines.push(`  createdAt: ${oneLine(meta.createdAt)}`)
   lines.push(`  updatedAt: ${oneLine(meta.updatedAt)}`)
@@ -173,6 +177,20 @@ function parseEntry(text) {
     if (inMetadata) meta[m[1]] = m[2].trim()
   }
   return { meta, body }
+}
+
+/**
+ * 读条目 frontmatter 里的 brief（≤12 字压缩摘要）。注入块用它替代长摘要，见 README §12.5。
+ * 只读文件头 600 字节（frontmatter 一定在里面），异常一律当作"没有 brief"，不影响注入。
+ */
+function readBrief(home, target) {
+  try {
+    const head = fs.readFileSync(path.join(home, String(target).replace(/\//g, path.sep)), 'utf8').slice(0, 600).replace(/\r\n/g, '\n')
+    const m = /^brief:[ \t]*(.+)$/m.exec(head)
+    return m ? oneLine(m[1]) : ''
+  } catch (_) {
+    return ''
+  }
 }
 
 // ---------------------------------------------------------------- index
@@ -474,6 +492,10 @@ function createStore(options) {
   const maxBlockBytes = Number.isFinite(opts.maxBlockBytes) && opts.maxBlockBytes > 0
     ? Math.floor(opts.maxBlockBytes)
     : 20000
+  // 注入块里每条条目优先渲染 brief（≤12 字压缩摘要），把块体积压到一半左右、离预算上限更远。
+  // brief 缺失时自动退回完整 description 摘要；briefInIndex: false 则一律用摘要（一行回滚开关）。
+  // 依据：2026-10-09 曾用"专题地图"压缩索引丢掉了逐条信息被否；本次改为**保留每条、只压摘要**。见 README §12.5
+  const useBrief = opts.briefInIndex !== false
   // 落盘后自动本地提交（只 commit、不 push）。默认开；home 不是 git 仓库时自动跳过。
   // 工作区记忆区块：默认写 <cwd>/AGENTS.local.md（DSH 会独立扫描 .local 变体，
   // 且它按惯例不进版本控制，避免把生成物塞进用户的仓库）。
@@ -654,6 +676,8 @@ function createStore(options) {
     const meta = {
       name: slug,
       description: oneLine(input.description),
+      // brief 可选：≤12 字压缩摘要。更新条目时若没给 brief，沿用已有的（普通补充内容不该把 brief 抹掉）
+      brief: oneLine(input.brief || (prev && prev.meta.brief) || ''),
       type: ENTRY_TYPES.includes(input.type) ? input.type : 'reference',
       scope: sp.scope,
       originSessionId: input.sessionId ? String(input.sessionId) : (prev && prev.meta.originSessionId) || '',
@@ -847,6 +871,14 @@ function createStore(options) {
 
   // ------------------------------------------------------------ AGENTS.md
 
+  /** 注入块里的一行条目：优先 brief（≤12 字压缩摘要），退到完整摘要；见 README §12.5。 */
+  function entryLine(e) {
+    const brief = useBrief ? readBrief(home, e.target) : ''
+    const sum = brief || e.summary
+    return `- [${e.title}](${e.target})${sum ? ` — ${sum}` : ''}` +
+      (e.section && e.section !== DEFAULT_SECTION ? `　\`${e.section}\`` : '')
+  }
+
   function buildBlock(cwd) {
     const g = listIndex('global')
     const lines = []
@@ -866,8 +898,7 @@ function createStore(options) {
     const headerBytes = Buffer.byteLength(lines.join('\n'), 'utf8')
     const budget = Math.max(256, maxBlockBytes - headerBytes - 128)
     const bodyLines = g.entries.length
-      ? g.entries.map((e) => `- [${e.title}](${e.target})${e.summary ? ` — ${e.summary}` : ''}` +
-          (e.section && e.section !== DEFAULT_SECTION ? `　\`${e.section}\`` : ''))
+      ? g.entries.map(entryLine)
       : ['（空——还没有任何记忆条目）']
     const kept = []
     let used = 0
@@ -929,8 +960,7 @@ function createStore(options) {
     const headerBytes = Buffer.byteLength(lines.join('\n'), 'utf8')
     const budget = Math.max(256, maxProjectBlockBytes - headerBytes - 128)
     const bodyLines = p.entries.length
-      ? p.entries.map((e) => `- [${e.title}](${e.target})${e.summary ? ` — ${e.summary}` : ''}` +
-          (e.section && e.section !== DEFAULT_SECTION ? `　\`${e.section}\`` : ''))
+      ? p.entries.map(entryLine)
       : ['（空——本工作区还没有记忆条目）']
     const kept = []
     let used = 0
