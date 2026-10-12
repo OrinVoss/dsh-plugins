@@ -18,24 +18,35 @@ window.__ModuleLoader__.load({
     //     Button.module.css / Input.module.css / Tag.module.css。
     // - 只用 `--dsw-*` token；`--dsw-radius-*` 带兜底值，避免宿主未定义时塌成直角。
     const CSS = [
-      '.dshmem-root{display:flex;flex-direction:column;width:100%;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}',
+      '.dshmem-root{display:flex;flex-direction:column;width:100%;max-width:760px;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}',
 
-      // 页头：图标 + 标题 + 说明（设置面板没有 per-section 标题，页面自己给）
+      // 页头：标题 + 说明（设置面板没有 per-section 标题，页面自己给；
+      // 规格照原生 PluginsSettingsSection：heading 18px/600、intro 13px tertiary）
       '.dshmem-head{display:flex;align-items:center;gap:10px;padding:18px 0 14px}',
-      '.dshmem-headIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
       '.dshmem-headText{min-width:0}',
-      '.dshmem-headTitle{font-size:16px;font-weight:500;line-height:24px}',
-      '.dshmem-headDesc{margin-top:2px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      '.dshmem-headTitle{font-size:18px;font-weight:600;line-height:26px}',
+      '.dshmem-headDesc{margin-top:2px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}',
 
       // 工具栏
       '.dshmem-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:10px}',
-      '.dshmem-search{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;flex:1;min-width:190px;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1)}',
+      '.dshmem-search{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;flex:1;min-width:190px;height:36px;padding:0 12px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1)}',
       '.dshmem-search:focus-within{border-color:var(--dsw-alias-state-business-primary)}',
       '.dshmem-searchIcon{flex:none;display:inline-flex;color:var(--dsw-alias-label-tertiary)}',
-      '.dshmem-searchInput{flex:1;min-width:0;border:none;outline:none;background:transparent;padding:0;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}',
+      '.dshmem-searchInput{flex:1;min-width:0;border:none;outline:none;background:transparent;padding:0;font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary)}',
       '.dshmem-searchInput::placeholder{color:var(--dsw-alias-label-dimmed)}',
-      '.dshmem-select{box-sizing:border-box;height:32px;max-width:240px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:22px;outline:none}',
-      '.dshmem-select:focus{border-color:var(--dsw-alias-state-business-primary)}',
+      // 自绘下拉（原生 <select> 弹层是系统样式，与宿主不一致；照 MenuView/PopupSelectView 规格）
+      '.dshmem-dd{position:relative;display:inline-flex;min-width:0}',
+      '.dshmem-ddBtn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:space-between;gap:8px;height:36px;max-width:240px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px;cursor:pointer}',
+      '.dshmem-ddBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dshmem-ddBtn:disabled{cursor:not-allowed;opacity:.4}',
+      '.dshmem-ddBtn>svg{flex:none;color:var(--dsw-alias-label-tertiary)}',
+      '.dshmem-ddLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshmem-ddMenu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;box-sizing:border-box;min-width:100%;max-width:320px;max-height:320px;overflow-y:auto;padding:4px;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-1));border-radius:var(--dsw-radius-md,12px);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35))}',
+      '.dshmem-ddItem{display:flex;align-items:center;gap:6px;box-sizing:border-box;width:100%;min-height:34px;padding:6px 8px;border:none;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer}',
+      '.dshmem-ddItem:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dshmem-ddItemLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshmem-ddCheck{display:inline-flex;flex:none;margin-left:auto;color:var(--dsw-alias-label-primary)}',
+      '.dshmem-ddCheck svg{width:14px;height:14px}',
 
       // 按钮：primitives/Button.module.css 的 sm 规格
       '.dshmem-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;border:none;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap}',
@@ -74,10 +85,10 @@ window.__ModuleLoader__.load({
 
       // 分组标题与行
       '.dshmem-group{padding:18px 0 2px;font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-secondary)}',
-      '.dshmem-row{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:24px;width:100%;padding:14px 0;border:none;border-bottom:.5px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;text-align:left;cursor:pointer}',
+      '.dshmem-row{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:24px;width:100%;padding:16px 0;border:none;border-bottom:.5px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;text-align:left;cursor:pointer}',
       '.dshmem-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.dshmem-rowMain{flex:1;min-width:0}',
-      '.dshmem-rowTitle{font-size:14px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshmem-rowTitle{font-size:14px;line-height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshmem-rowSum{margin-top:4px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
       '.dshmem-rowPath{margin-top:4px;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
 
@@ -92,7 +103,7 @@ window.__ModuleLoader__.load({
       '.dshmem-editorTitle{font-size:16px;font-weight:500;line-height:24px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshmem-field{display:flex;flex-direction:column;gap:6px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
       '.dshmem-label{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
-      '.dshmem-input{box-sizing:border-box;width:100%;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px;outline:none}',
+      '.dshmem-input{box-sizing:border-box;width:100%;height:36px;padding:0 12px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px;outline:none}',
       '.dshmem-input:focus{border-color:var(--dsw-alias-state-business-primary)}',
       '.dshmem-input:disabled{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2)}',
       '.dshmem-area{box-sizing:border-box;width:100%;min-height:240px;resize:vertical;padding:8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:19px;outline:none}',
@@ -111,28 +122,6 @@ window.__ModuleLoader__.load({
       document.head.appendChild(tag)
     }
 
-    // ------------------------------------------------------------------ 图标
-    // 自绘的「记忆 / 笔记」字形：16px 网格、currentColor 描边，规格对齐宿主图标。
-    function MemoryGlyph(props) {
-      const size = (props && props.size) || 16
-      return h('svg', {
-        viewBox: '0 0 16 16',
-        width: size,
-        height: size,
-        fill: 'none',
-        stroke: 'currentColor',
-        strokeWidth: 1.2,
-        strokeLinecap: 'round',
-        strokeLinejoin: 'round',
-        'aria-hidden': 'true',
-        focusable: 'false',
-        style: { display: 'block' }
-      },
-      h('path', { d: 'M3.25 3.1h6.6a1.6 1.6 0 0 1 1.6 1.6v8.2H4.85a1.6 1.6 0 0 1-1.6-1.6z' }),
-      h('path', { d: 'M3.25 11.3a1.6 1.6 0 0 1 1.6-1.6h6.6' }),
-      h('path', { d: 'M5.9 5.6h3.5M5.9 8h3.5' }))
-    }
-
     function SearchGlyph() {
       return h('svg', {
         viewBox: '0 0 16 16', width: 14, height: 14, fill: 'none', stroke: 'currentColor',
@@ -141,6 +130,73 @@ window.__ModuleLoader__.load({
       },
       h('circle', { cx: 7, cy: 7, r: 4.25 }),
       h('path', { d: 'M10.2 10.2 13.5 13.5' }))
+    }
+
+    function ChevronGlyph() {
+      return h('svg', {
+        viewBox: '0 0 16 16', width: 14, height: 14, fill: 'none', stroke: 'currentColor',
+        strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': 'true', focusable: 'false', style: { display: 'block' }
+      },
+      h('path', { d: 'M5 6.5 8 9.5l3-3' }))
+    }
+
+    function CheckGlyph() {
+      return h('svg', {
+        viewBox: '0 0 16 16', width: 14, height: 14, fill: 'none', stroke: 'currentColor',
+        strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': 'true', focusable: 'false', style: { display: 'block' }
+      },
+      h('path', { d: 'M3.5 8.5 6.5 11.5 12.5 4.5' }))
+    }
+
+    // 自绘下拉：替代原生 <select>（其弹层是系统样式，与宿主自绘菜单两套观感）。
+    // 规格照原生 MenuView/PopupSelectView：项 min-height 34、悬停 interactive-bg-hover、
+    // 选中项右侧 14px 对勾、菜单 elevation-prominent 浮层。
+    function Dropdown(props) {
+      const options = props.options || []
+      const [open, setOpen] = React.useState(false)
+      const wrapRef = React.useRef(null)
+      React.useEffect(() => {
+        if (!open) return undefined
+        const onDoc = (e) => {
+          if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+        }
+        const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+        document.addEventListener('mousedown', onDoc)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('mousedown', onDoc)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [open])
+      const current = options.find((o) => o.value === props.value)
+      return h('div', { className: 'dshmem-dd', ref: wrapRef },
+        h('button', {
+          type: 'button',
+          className: 'dshmem-ddBtn',
+          style: props.btnStyle,
+          disabled: props.disabled === true,
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-haspopup': 'menu',
+          onClick: () => setOpen(!open)
+        },
+          h('span', { className: 'dshmem-ddLabel' }, current ? current.label : ''),
+          h(ChevronGlyph, null)),
+        open
+          ? h('div', { className: 'dshmem-ddMenu', role: 'menu' },
+              options.map((o) => h('button', {
+                key: o.value,
+                type: 'button',
+                role: 'menuitem',
+                className: 'dshmem-ddItem',
+                onClick: () => { setOpen(false); props.onChange(o.value) }
+              },
+                h('span', { className: 'dshmem-ddItemLabel' }, o.label),
+                o.value === props.value
+                  ? h('span', { className: 'dshmem-ddCheck' }, h(CheckGlyph, null))
+                  : null)))
+          : null)
     }
 
     // ------------------------------------------------------------------ 接口
@@ -493,12 +549,13 @@ window.__ModuleLoader__.load({
                 onChange: (e) => setEditing({ ...editing, name: e.target.value })
               })),
             h(Field, { label: 'type' },
-              h('select', {
-                className: 'dshmem-select',
-                style: { width: '100%', maxWidth: 'none' },
-                value: editing.type,
-                onChange: (e) => setEditing({ ...editing, type: e.target.value })
-              }, TYPES.map((t) => h('option', { key: t, value: t }, `${t}（${TYPE_LABEL[t]}）`))))),
+              h('div', { style: { width: '100%' } },
+                h(Dropdown, {
+                  value: editing.type,
+                  btnStyle: { width: '100%', maxWidth: 'none' },
+                  onChange: (t) => setEditing({ ...editing, type: t }),
+                  options: TYPES.map((t) => ({ value: t, label: `${t}（${TYPE_LABEL[t]}）` }))
+                })))),
 
           h('div', { className: 'dshmem-two' },
             h(Field, { label: '索引分组 section（留空则用 name 的第一段目录）' },
@@ -561,7 +618,6 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dshmem-root' },
         // 页头
         h('div', { className: 'dshmem-head' },
-          h('span', { className: 'dshmem-headIcon' }, h(MemoryGlyph, { size: 16 })),
           h('div', { className: 'dshmem-headText' },
             h('div', { className: 'dshmem-headTitle' }, '记忆'),
             h('div', { className: 'dshmem-headDesc' },
@@ -577,22 +633,23 @@ window.__ModuleLoader__.load({
               value: query,
               onChange: (e) => setQuery(e.target.value)
             })),
-          h('select', {
-            className: 'dshmem-select',
+          h(Dropdown, {
             value: scope,
-            onChange: (e) => onScopeChange(e.target.value)
-          },
-          h('option', { value: 'global' }, '全局记忆'),
-          h('option', { value: 'project' }, '工作区记忆')),
+            onChange: onScopeChange,
+            options: [
+              { value: 'global', label: '全局记忆' },
+              { value: 'project', label: '工作区记忆' }
+            ]
+          }),
           scope === 'project'
-            ? h('select', {
-                className: 'dshmem-select',
+            ? h(Dropdown, {
                 value: key,
-                onChange: (e) => onKeyChange(e.target.value)
-              },
-              projects.length === 0
-                ? h('option', { value: '' }, '（还没有工作区记忆）')
-                : projects.map((p) => h('option', { key: p.key, value: p.key }, `${p.key}（${p.entries} 条）`)))
+                onChange: onKeyChange,
+                disabled: projects.length === 0,
+                options: projects.length === 0
+                  ? [{ value: '', label: '（还没有工作区记忆）' }]
+                  : projects.map((p) => ({ value: p.key, label: `${p.key}（${p.entries} 条）` }))
+              })
             : null,
           h('span', { className: 'dshmem-spacer' }),
           h(Button, { variant: 'primary', onClick: openNew, disabled: busy }, '新建条目')),

@@ -139,15 +139,15 @@ check('沿用宿主设置行的规格（0.5px 发丝线 + primitives 的圆角�
   assert.ok(css.includes('border-radius:var(--dsw-radius-md,12px)'), '控件圆角应走 --dsw-radius-md 并带兜底（官方 12px）')
   assert.ok(css.includes('border-radius:var(--dsw-radius-sm,8px)'), '控件圆角应走 --dsw-radius-sm 并带兜底（官方 8px）')
   assert.ok(css.includes('height:28px'), '按钮应为 primitives 的 sm 高度')
-  assert.ok(css.includes('height:32px'), '输入框/选择器应为 primitives 的 32px')
+  assert.ok(css.includes('height:36px'), '搜索框/下拉/输入框应为 36px（对齐原生输入规格，2026-10-12 起）')
   assert.ok(css.includes('var(--dsw-alias-button-primary-fill)'), '主按钮应走 primary fill token')
   assert.ok(css.includes('var(--dsw-alias-label-dimmed)'), 'placeholder 应走 dimmed token')
 })
 
-check('页面自带记忆字形（导航图标由外壳按 id 硬编码，页面内补）', () => {
+check('页头对齐原生设置页（无图标，2026-10-12 起；搜索框保留放大镜字形）', () => {
   const tree = registrations[0].Component({})
   const json = JSON.stringify(treeTree(tree))
-  assert.ok(json.includes('MemoryGlyph'), '应渲染自绘的记忆字形组件')
+  assert.ok(!json.includes('MemoryGlyph'), '页头不再渲染自绘图标（对齐原生设置页）')
   assert.ok(json.includes('SearchGlyph'), '搜索框应带放大镜字形')
   assert.ok(json.includes('记忆'))
 })

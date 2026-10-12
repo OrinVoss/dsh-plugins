@@ -22,11 +22,15 @@ window.__ModuleLoader__.load({
     // 只用 `--dsw-*` token，不发明新视觉；半径 token 带兜底值。
     // 图表配色是固定色盘：数据系列要彼此可区分，且明暗主题下都读得清。
     const CSS = [
-      '.dshts-root{display:flex;flex-direction:column;width:100%;height:100%;overflow-y:auto;box-sizing:border-box;padding:20px 24px 40px;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}',
-      '.dshts-head{display:flex;align-items:center;gap:10px;padding-bottom:14px}',
-      '.dshts-headIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-business-primary)}',
-      '.dshts-title{font-size:16px;font-weight:500;line-height:24px}',
-      '.dshts-sub{margin-top:2px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      // 布局照原生侧栏整页（PluginManagerPage）：页头 28px 顶距，内容栏 960px 居中，
+      // clamp(24px,4vw,48px) 侧距；设置子页才是 720/760px，本页是侧栏 main 面板。
+      '.dshts-root{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;width:100%;height:100%;overflow-y:auto;padding:0 clamp(24px,4vw,48px) 48px;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}',
+      '.dshts-root>*{box-sizing:border-box;width:100%;max-width:960px}',
+      '.dshts-head{display:flex;align-items:center;gap:10px;padding:28px 0 14px}',
+      // 页头标题照原生侧栏页（PluginManagerPage.pageTitle）：20px/500/28
+      '.dshts-title{font-size:20px;font-weight:500;line-height:28px}',
+      // 说明照原生 pageIntro：13px/20 secondary
+      '.dshts-sub{margin-top:4px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary)}',
       '.dshts-spacer{flex:1}',
       '.dshts-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 12px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap}',
       '.dshts-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
@@ -45,7 +49,7 @@ window.__ModuleLoader__.load({
 
       '.dshts-card{margin-bottom:16px;padding:16px 18px 18px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-bg-layer-1)}',
       '.dshts-cardHead{display:flex;align-items:center;gap:10px;padding-bottom:14px}',
-      '.dshts-cardTitle{font-size:14px;line-height:20px;font-weight:500}',
+      '.dshts-cardTitle{font-size:14px;line-height:22px;font-weight:500}',
       '.dshts-cardNote{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}',
 
       '.dshts-heat{overflow-x:auto;padding-bottom:6px}',
@@ -792,7 +796,6 @@ window.__ModuleLoader__.load({
       }, [])
 
       const header = h('div', { className: 'dshts-head' },
-        h('span', { className: 'dshts-headIcon' }, h(StatsGlyph, { size: 16 })),
         h('div', null,
           h('div', { className: 'dshts-title' }, 'Token 用量统计'),
           h('div', { className: 'dshts-sub' },
