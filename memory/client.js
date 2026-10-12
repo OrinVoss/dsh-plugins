@@ -41,7 +41,10 @@ window.__ModuleLoader__.load({
       '.dshmem-ddBtn:disabled{cursor:not-allowed;opacity:.4}',
       '.dshmem-ddBtn>svg{flex:none;color:var(--dsw-alias-label-tertiary)}',
       '.dshmem-ddLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshmem-ddMenu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;box-sizing:border-box;min-width:100%;max-width:320px;max-height:320px;overflow-y:auto;padding:4px;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-1));border-radius:var(--dsw-radius-md,12px);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35))}',
+      // ⚠️ --dsw-specific-menu 是**半透明**的（深色下 --dsw-menu-surface-fill = #43454a73 ≈ 45%），
+      // 官方每个菜单都同时写 backdrop-filter 材质；漏掉那行菜单就是「透」而不是磨砂
+      // （2026-10-13 真机反馈）。message-edit 的撤回气泡是同一套写法。
+      '.dshmem-ddMenu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;box-sizing:border-box;min-width:100%;max-width:320px;max-height:320px;overflow-y:auto;padding:4px;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-1));backdrop-filter:var(--dsw-menu-backdrop-filter,none);border-radius:var(--dsw-radius-md,12px);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35))}',
       // 右对齐变体：菜单默认从锚点左缘向右展开；若右缘会越出最近的裁剪容器（设置面板 overflow），
       // 就翻成右对齐——否则长工作区名 +「（N 条）」会被面板边缘切掉（2026-10-12 真机反馈）。
       '.dshmem-ddMenuRight{left:auto;right:0}',

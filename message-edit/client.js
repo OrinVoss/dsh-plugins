@@ -171,6 +171,7 @@ window.__ModuleLoader__.load({
 .me-toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:3000;
   background:var(--dsw-specific-menu,rgba(30,30,30,.92));color:var(--dsw-alias-label-primary,#fff);
   border-radius:var(--dsw-radius-lg,12px);padding:7px 14px;font-size:13px;line-height:20px;
+  backdrop-filter:var(--dsw-menu-backdrop-filter,none);
   box-shadow:var(--dsw-elevation-prominent,0 6px 24px rgba(0,0,0,.25));pointer-events:none;opacity:.96}
 /*
  * 撤回确认气泡：**挂在消息行内**的小弹层，不做全屏遮罩。

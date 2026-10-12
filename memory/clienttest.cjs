@@ -133,6 +133,15 @@ check('下拉菜单会按最近的裁剪容器测量并按需右对齐（长工�
   assert.ok(src.includes("' dshmem-ddMenuRight'"), '应把右对齐类挂到菜单上')
 })
 
+check('半透明菜单面必须同时给官方材质（否则菜单是「透」的，2026-10-13 真机反馈）', () => {
+  const css = styleTags[0].textContent
+  const menu = /\.dshmem-ddMenu\{([^}]*)\}/.exec(css)
+  assert.ok(menu, '找不到 .dshmem-ddMenu 规则')
+  assert.ok(menu[1].includes('background:var(--dsw-specific-menu'), '菜单面应走官方菜单面 token')
+  assert.ok(/backdrop-filter:var\(--dsw-menu-backdrop-filter/.test(menu[1]),
+    '--dsw-specific-menu 是半透明色，必须配 --dsw-menu-backdrop-filter 材质')
+})
+
 check('样式只注入一次且用主题 token', () => {
   assert.equal(styleTags.length, 1)
   const css = styleTags[0].textContent
