@@ -42,6 +42,9 @@ window.__ModuleLoader__.load({
       '.dshmem-ddBtn>svg{flex:none;color:var(--dsw-alias-label-tertiary)}',
       '.dshmem-ddLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshmem-ddMenu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;box-sizing:border-box;min-width:100%;max-width:320px;max-height:320px;overflow-y:auto;padding:4px;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-1));border-radius:var(--dsw-radius-md,12px);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35))}',
+      // 右对齐变体：菜单默认从锚点左缘向右展开；若右缘会越出最近的裁剪容器（设置面板 overflow），
+      // 就翻成右对齐——否则长工作区名 +「（N 条）」会被面板边缘切掉（2026-10-12 真机反馈）。
+      '.dshmem-ddMenuRight{left:auto;right:0}',
       '.dshmem-ddItem{display:flex;align-items:center;gap:6px;box-sizing:border-box;width:100%;min-height:34px;padding:6px 8px;border:none;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer}',
       '.dshmem-ddItem:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.dshmem-ddItemLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
@@ -156,7 +159,31 @@ window.__ModuleLoader__.load({
     function Dropdown(props) {
       const options = props.options || []
       const [open, setOpen] = React.useState(false)
+      const [alignRight, setAlignRight] = React.useState(false)
       const wrapRef = React.useRef(null)
+      const menuRef = React.useRef(null)
+      // 打开时量一次：默认左对齐（锚点左缘向右展开）；若菜单右缘会越出最近的裁剪容器
+      // （设置面板/视口）就翻成右对齐。用 useLayoutEffect 是为了在绘制前定好位置，
+      // 不会看到菜单先左后右跳一下。
+      React.useLayoutEffect(() => {
+        if (!open) return undefined
+        const wrap = wrapRef.current
+        const menu = menuRef.current
+        if (!wrap || !menu || typeof wrap.getBoundingClientRect !== 'function') return undefined
+        const anchor = wrap.getBoundingClientRect()
+        const measured = menu.offsetWidth || (typeof menu.getBoundingClientRect === 'function' ? menu.getBoundingClientRect().width : 0)
+        const width = measured || 320
+        let boundary = document.documentElement ? document.documentElement.clientWidth : window.innerWidth
+        for (let el = wrap.parentElement; el; el = el.parentElement) {
+          const cs = window.getComputedStyle(el)
+          if (cs && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible')) {
+            const box = el.getBoundingClientRect()
+            if (box.width > 0) { boundary = box.right; break }
+          }
+        }
+        setAlignRight(anchor.left + width > boundary - 8)
+        return undefined
+      }, [open])
       React.useEffect(() => {
         if (!open) return undefined
         const onDoc = (e) => {
@@ -184,7 +211,11 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dshmem-ddLabel' }, current ? current.label : ''),
           h(ChevronGlyph, null)),
         open
-          ? h('div', { className: 'dshmem-ddMenu', role: 'menu' },
+          ? h('div', {
+              className: 'dshmem-ddMenu' + (alignRight ? ' dshmem-ddMenuRight' : ''),
+              role: 'menu',
+              ref: menuRef
+            },
               options.map((o) => h('button', {
                 key: o.value,
                 type: 'button',

@@ -54,6 +54,10 @@ const React = {
     const cleanup = fn()
     if (typeof cleanup === 'function') cleanup()
   },
+  useLayoutEffect(fn) {
+    const cleanup = fn()
+    if (typeof cleanup === 'function') cleanup()
+  },
   useCallback(fn) { return fn },
   useMemo(fn) { return fn() },
   useRef(v) { return { current: v } }
@@ -113,6 +117,20 @@ check('apply 注入 settings.section 并带正确注册参数', () => {
   assert.equal(typeof props.label, 'function')
   assert.equal(props.label(), '记忆')
   assert.equal(typeof Component, 'function')
+})
+
+check('下拉菜单会按最近的裁剪容器测量并按需右对齐（长工作区名不再被面板边缘裁掉）', () => {
+  const css = styleTags[0].textContent
+  assert.ok(css.includes('.dshmem-ddMenuRight{left:auto;right:0}'), '应有右对齐变体')
+  const menu = /\.dshmem-ddMenu\{([^}]*)\}/.exec(css)
+  assert.ok(menu, '找不到 .dshmem-ddMenu 规则')
+  assert.ok(menu[1].includes('max-width:320px'), '菜单宽度上限应仍在（不靠压缩宽度来避免越界）')
+  assert.ok(!/\.dshmem-ddMenu\{[^}]*right:0/.test(css), '默认不应直接右对齐（左对齐仍是常态）')
+  const src = fs.readFileSync(path.join(__dirname, 'client.js'), 'utf8')
+  assert.ok(src.includes('React.useLayoutEffect'), '应在绘制前测量，避免菜单跳一下')
+  assert.ok(src.includes('getBoundingClientRect'), '应测量锚点与边界')
+  assert.ok(src.includes('overflowX'), '边界应取最近的裁剪容器（没有则退回视口）')
+  assert.ok(src.includes("' dshmem-ddMenuRight'"), '应把右对齐类挂到菜单上')
 })
 
 check('样式只注入一次且用主题 token', () => {
