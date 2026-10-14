@@ -78,6 +78,13 @@ check('按轮次的行过滤', /data-chat-turn/.test(client) && /applyHiddenRows
   }
 }
 check('编辑态沿用官方气泡几何', /--dsw-radius-xl/.test(client) && /padding:9px 15px/.test(client) && /--dsh-content-font-size,14px/.test(client))
+// 编辑框宽度必须**严格等于实测气泡**：官方 .bubble 内容自适应、无 min-width，短消息就是个小气泡；
+// 一旦给编辑框加 minWidth，它会以气泡左缘向右长，右缘越出内容列压到滚动条上，贴右缘的 ✓/✕
+// 就撞上滚动条（2026-10-14 真机反馈）。minWidth 只允许出现在量不到气泡的兜底分支（那里是
+// right:0，向左生长不会越界）。
+check('编辑框不得有最小宽度（短消息会被撑宽、✓/✕ 撞滚动条）',
+  (client.match(/minWidth: '180px'/g) ?? []).length === 1
+  && /editBox === null\s*\?\s*\{ position: 'absolute', right: 0, bottom: 0, minWidth: '180px' \}/.test(client))
 check('按钮几何沿用官方 action', /--dsw-radius-sm/.test(client) && /calc\(28px \+ var\(--dsh-content-font-delta/.test(client))
 check('按钮排进原生操作行（复制键右侧）', /\[data-clock="start"\]\{padding-right:calc\(72px \+ 2 \* var\(--dsh-content-font-delta/.test(client))
 check('编辑/撤回是图标钮', /IconEdit/.test(client) && /IconRetract/.test(client))

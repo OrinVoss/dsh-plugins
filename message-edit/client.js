@@ -697,6 +697,13 @@ window.__ModuleLoader__.load({
           // 编辑框用实测盒子**原位覆盖**在文字气泡上（白底 + 蓝描线），
           // 因此位置、宽度、最小高度都与原气泡完全一致，不会跳。
           // 按键行为照抄 QueueDock 的 QueueEditor：Enter 保存、Shift+Enter 换行、Esc 取消。
+          // ⚠️ 实测盒子上**不要**加 minWidth（2026-10-14 真机反馈）：官方 .bubble 是内容自适应、
+          // 没有 min-width（`.bubble{...max-width:100%;padding:10px 16px}`），两字符的消息就是个
+          // 小气泡。早先这里写死 minWidth:180px，短消息的编辑框被撑到 180px：盒子以气泡左缘为基准
+          // 向右长，右缘就越出内容列、扎进应用滚动条区域，而 ✓/✕ 是贴着盒子右缘（right:0）的，
+          // 于是 ✕ 正好压在滚动条上（真机截图：编辑"ok"时 ✕ 被滚动条虚线穿过）。
+          // 宽度严格等于气泡 ⇒ 文字位置不动、右缘与官方操作行对齐、不会撞滚动条。
+          // 最小宽度只留给量不到气泡的兜底分支，并且那里是 right:0（向左生长，不会越界）。
           const boxStyle = editBox === null
             ? { position: 'absolute', right: 0, bottom: 0, minWidth: '180px' }
             : {
@@ -704,7 +711,6 @@ window.__ModuleLoader__.load({
                 top: `${editBox.top}px`,
                 left: `${editBox.left}px`,
                 width: `${editBox.width}px`,
-                minWidth: '180px',
                 minHeight: `${editBox.height}px`,
               }
           return React.createElement('div', { className: 'me-root', ref: rootRef, 'data-editing': '1' },
