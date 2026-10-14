@@ -20,8 +20,14 @@
  *     这里不用"wrap 每个 chat node 渲染器"的做法：官方有几种节点（`tool-call`、`turn-tail`、
  *     `command`）自己声明了 children slot，而同一个 child slot 不能声明两次；不声明就拿不到
  *     官方 kit 里的 `renderSlot`，转发 props 后官方组件会崩。所以改为：按行上的
- *     `data-chat-turn` 做一次作用域内的显示过滤（被遮蔽的轮次是一个**后缀块**，
- *     因此可以取"第一个到最后一个命中行"的连续区间，天然覆盖区间内没有 turn 属性的行）。
+ *     `data-chat-turn` 做一次作用域内的显示过滤——没有属性的行沿用上一行的轮次（前向填充），
+ *     然后**逐行**判断该轮次是否落在被遮蔽集合里。
+ *
+ *     ⚠️ **不要**改成"取第一个命中行 → 最后一个命中行的连续区间"。2026-10-14 之前就是这么写的，
+ *     前提是"被遮蔽的轮次永远是后缀块"——**这个前提不成立**：撤回/编辑可以反复发生，中间夹着
+ *     之后新建的正常轮次，被遮蔽轮次集合因此有空洞。真实会话日志实测：某个 133 轮的会话里
+ *     16 个轮次被遮蔽，而连续区间是 103 个轮次，等于把 87 个**仍在模型上下文里**的轮次一起
+ *     藏掉（用户看到的就是"撤回一条，消失好几条"）。
  *
  * 与宿主半边的通道：GET/POST /message-edit-api/*（与 btw / sysmon 同一套 webServer 约定）。
  * 客户端插件只能 require 真正的 __ModuleLoader__ 模块（react），不能 require app 内部 ESM 库，
@@ -296,11 +302,32 @@ window.__ModuleLoader__.load({
     // ------------------------------------------------------------------ 行过滤
 
     /**
-     * 在给定容器内隐藏"被遮蔽轮次"的行。
+     * 纯函数：判定每一行该不该隐藏。
      *
-     * 被遮蔽的轮次永远是一个后缀块（撤回从某条消息起、遮蔽到操作时的末尾），
-     * 所以这里取"第一个命中行 → 最后一个命中行"的连续区间：既覆盖区间内没有
-     * `data-chat-turn` 的行，也不会波及之后新建的行（新轮次号更大、排在区间之后）。
+     * **必须逐行判断，绝不能取"首尾连续区间"**（2026-10-14 修正）：撤回/编辑可以多次发生，
+     * 中间夹着之后新建的正常轮次，所以被遮蔽轮次集合**有空洞**——取连续区间会把空洞里那些
+     * 仍在模型上下文里的轮次一起藏掉。真实日志实测：16 个被遮蔽轮次，连续区间却是 103 个，
+     * 多藏 87 个（用户反馈"撤回一条，消失好几条"）。
+     *
+     * 没有 `data-chat-turn` 的行沿用上一行的轮次（前向填充）；首个带轮次的行之前不藏。
+     * 独立成纯函数是为了让 selfcheck 能把真函数抠出来直接验证（含"有空洞"的用例）。
+     *
+     * @param rawTurns - 每行 `data-chat-turn` 的原始值（null/'' = 该行没有轮次属性）。
+     * @param turns - 被遮蔽的轮次号数组。
+     * @returns 与 rawTurns 等长的布尔数组。
+     */
+    function hiddenRowFlags(rawTurns, turns) {
+      const set = new Set(Array.isArray(turns) ? turns : EMPTY)
+      let current
+      return (Array.isArray(rawTurns) ? rawTurns : []).map((raw) => {
+        const parsed = raw === null || raw === undefined || raw === '' ? Number.NaN : Number(raw)
+        if (Number.isFinite(parsed)) current = parsed
+        return Number.isFinite(current) && set.has(current)
+      })
+    }
+
+    /**
+     * 在给定容器内隐藏"被遮蔽轮次"的行（判定见 hiddenRowFlags）。
      *
      * @param container - 对话流容器（行元素的父节点）。
      * @param turns - 被遮蔽的轮次号数组。
@@ -308,24 +335,9 @@ window.__ModuleLoader__.load({
     function applyHiddenRows(container, turns) {
       if (container === null || container === undefined) return
       const rows = [...container.querySelectorAll(ROW_SELECTOR)]
-      const set = new Set(Array.isArray(turns) ? turns : EMPTY)
-      // 前向填充：没有 data-chat-turn 的行沿用上一行的轮次。
-      let current = undefined
-      const flags = rows.map((row) => {
-        const raw = row.getAttribute('data-chat-turn')
-        const parsed = raw === null || raw === '' ? Number.NaN : Number(raw)
-        if (Number.isFinite(parsed)) current = parsed
-        return Number.isFinite(current) && set.has(current)
-      })
-      let first = -1
-      let last = -1
-      flags.forEach((flag, index) => {
-        if (!flag) return
-        if (first === -1) first = index
-        last = index
-      })
+      const flags = hiddenRowFlags(rows.map((row) => row.getAttribute('data-chat-turn')), turns)
       rows.forEach((row, index) => {
-        if (first !== -1 && index >= first && index <= last) row.setAttribute(HIDDEN_ATTR, '1')
+        if (flags[index]) row.setAttribute(HIDDEN_ATTR, '1')
         else row.removeAttribute(HIDDEN_ATTR)
       })
       // 例外：**撤回/编辑的占位节点必须留着**。官方把它渲染成「上下文」注入行

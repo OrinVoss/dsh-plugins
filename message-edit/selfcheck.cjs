@@ -58,6 +58,25 @@ check('复制官方 inject', /official\.inject === undefined \? \{\} : \{ inject
 check('官方条目按 priority 0 定位', /\(entry\.options\.priority \?\? 0\) === 0/.test(client))
 check('遮蔽优先级低于官方（压过热更遗留）', /priority:\s*-\d{3,}/.test(client))
 check('按轮次的行过滤', /data-chat-turn/.test(client) && /applyHiddenRows/.test(client))
+// 行过滤必须**逐行判断**，不能取「首尾连续区间」：撤回/编辑可以多次发生，中间夹着之后新建的
+// 正常轮次，被遮蔽集合因此有空洞；取连续区间会把空洞里的正常轮次一起藏掉（2026-10-14 真机反馈：
+// 某会话 16 个被遮蔽轮次 → 连续区间 103 个轮次，多藏 87 个）。
+// 把纯函数 hiddenRowFlags 从 client.js 里抠出来直接跑 —— 测的是真代码，不是复制品。
+{
+  const m = /function hiddenRowFlags\([\s\S]*?\n    \}/.exec(client)
+  check('找到纯函数 hiddenRowFlags（行过滤判定可测）', m !== null)
+  if (m !== null) {
+    // eslint-disable-next-line no-new-func
+    const hiddenRowFlags = new Function(`return (${m[0]})`)()
+    const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+    check('后缀块：3,4,5 全藏', eq(hiddenRowFlags(['3', '3', '4', '5'], [3, 4, 5]), [true, true, true, true]))
+    check('有空洞：只藏集合里的轮次，区间内正常轮次必须留着（回归闸）',
+      eq(hiddenRowFlags(['3', '4', '5', '6', '11', '12'], [3, 4, 6, 11]), [true, true, false, true, true, false]))
+    check('没有 data-chat-turn 的行沿用上一行轮次', eq(hiddenRowFlags(['5', null, null, '6'], [5]), [true, true, true, false]))
+    check('首个带轮次的行之前，属性缺失的行不藏', eq(hiddenRowFlags([null, '5'], [5]), [false, true]))
+    check('空输入不炸', eq(hiddenRowFlags([], []), []))
+  }
+}
 check('编辑态沿用官方气泡几何', /--dsw-radius-xl/.test(client) && /padding:9px 15px/.test(client) && /--dsh-content-font-size,14px/.test(client))
 check('按钮几何沿用官方 action', /--dsw-radius-sm/.test(client) && /calc\(28px \+ var\(--dsh-content-font-delta/.test(client))
 check('按钮排进原生操作行（复制键右侧）', /\[data-clock="start"\]\{padding-right:calc\(72px \+ 2 \* var\(--dsh-content-font-delta/.test(client))
