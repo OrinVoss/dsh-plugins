@@ -52,6 +52,11 @@ window.__ModuleLoader__.load({
     const ROW_SELECTOR = '[data-chat-flow-key]'
     /** 退出编辑的动画时长；必须与 CSS 里 `me-edit-morph-out` 的时长一致。 */
     const CLOSE_MS = 150
+    /**
+     * 编辑框最小宽度。气泡比它窄时，多出来的宽度**全部向左长**（右缘锚定气泡右缘），
+     * 并用 `--me-extra-left` 补成左内边距——这样 ✓/✕ 不会越出内容列，文字也一个像素不动。
+     */
+    const EDIT_MIN_WIDTH = 180
 
     const CN = !/^en/i.test((typeof navigator !== 'undefined' && navigator.language) || '')
     const COPY = {
@@ -150,6 +155,8 @@ window.__ModuleLoader__.load({
   border:1px solid var(--dsw-alias-state-business-primary,#4d6bfe);
   border-radius:var(--dsw-radius-xl);
   padding:9px 15px;color:var(--dsw-alias-label-primary);
+  /* 盒子比气泡宽时，多出的宽度补成左内边距 ⇒ 文字仍在原气泡那一格（见 EDIT_MIN_WIDTH） */
+  padding-left:calc(15px + var(--me-extra-left,0px));
   font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));
   display:flex;flex-direction:column}
 .me-editor-input{box-sizing:border-box;width:100%;margin:0;padding:0;
@@ -297,6 +304,21 @@ window.__ModuleLoader__.load({
         }).catch(() => {})
       } catch {}
       console.error(`[${ID}] ${where}: ${message}`)
+    }
+
+    /**
+     * 纯函数：由实测气泡宽度算编辑框宽度与左内边距补偿。
+     *
+     * 宽度 = max(气泡宽, EDIT_MIN_WIDTH)——多出来的部分**向左长**（右缘锚定气泡右缘），
+     * 并且用同样大小的左内边距补回来，所以文字仍在原气泡那一格，一个像素都不动。
+     * 独立成纯函数是为了让 selfcheck 直接跑真代码（"文字不动"就靠这个减法）。
+     *
+     * @param bubbleWidth - 实测气泡宽度（CSS px）。
+     * @returns { width, extraLeft }
+     */
+    function editorBoxWidth(bubbleWidth) {
+      const width = Math.max(bubbleWidth, EDIT_MIN_WIDTH)
+      return { width, extraLeft: width - bubbleWidth }
     }
 
     // ------------------------------------------------------------------ 行过滤
@@ -579,6 +601,8 @@ window.__ModuleLoader__.load({
           return {
             top: Math.round(rect.top - rootRect.top),
             left: Math.round(rect.left - rootRect.left),
+            // 到 root 右缘的距离：右缘锚定时用它，盒子多宽都不会越过气泡右缘。
+            right: Math.round(rootRect.right - rect.right),
             width: Math.round(rect.width),
             height: Math.round(rect.height),
           }
@@ -697,21 +721,27 @@ window.__ModuleLoader__.load({
           // 编辑框用实测盒子**原位覆盖**在文字气泡上（白底 + 蓝描线），
           // 因此位置、宽度、最小高度都与原气泡完全一致，不会跳。
           // 按键行为照抄 QueueDock 的 QueueEditor：Enter 保存、Shift+Enter 换行、Esc 取消。
-          // ⚠️ 实测盒子上**不要**加 minWidth（2026-10-14 真机反馈）：官方 .bubble 是内容自适应、
-          // 没有 min-width（`.bubble{...max-width:100%;padding:10px 16px}`），两字符的消息就是个
-          // 小气泡。早先这里写死 minWidth:180px，短消息的编辑框被撑到 180px：盒子以气泡左缘为基准
-          // 向右长，右缘就越出内容列、扎进应用滚动条区域，而 ✓/✕ 是贴着盒子右缘（right:0）的，
-          // 于是 ✕ 正好压在滚动条上（真机截图：编辑"ok"时 ✕ 被滚动条虚线穿过）。
-          // 宽度严格等于气泡 ⇒ 文字位置不动、右缘与官方操作行对齐、不会撞滚动条。
-          // 最小宽度只留给量不到气泡的兜底分支，并且那里是 right:0（向左生长，不会越界）。
+          // 宽度规则（2026-10-14 真机反馈定稿）：**右缘锚定气泡右缘**，宽度 = max(气泡宽, 最小宽)，
+          // 多出来的宽度**全部向左长**。
+          //   · 官方 .bubble 是内容自适应、没有 min-width（`.bubble{...max-width:100%;padding:10px 16px}`），
+          //     两字符的消息就是个小气泡，直接铺满会窄得不好打字 ⇒ 给个最小宽度；
+          //   · 但盒子**不能向右长**：早先是「左缘锚定 + minWidth」，短消息的盒子被撑到 180px，
+          //     右缘越出内容列扎进应用滚动条区域，而 ✓/✕ 贴着盒子右缘（right:0），✕ 正好压在滚动条上
+          //     （真机截图实测：编辑 "ok" 时盒子 172 CSS px、✕ 中心与滚动条虚线重叠）；
+          //   · 右缘锚定后，多出的宽度长在左边（右侧本来就是空白），✓/✕ 回到官方操作行那一列；
+          //   · 多出的宽度再用 --me-extra-left 补成左内边距 ⇒ 文字仍在原气泡那一格，一个像素不动。
+          const sized = editBox === null ? { width: EDIT_MIN_WIDTH, extraLeft: 0 } : editorBoxWidth(editBox.width)
+          const boxWidth = sized.width
+          const extraLeft = sized.extraLeft
           const boxStyle = editBox === null
-            ? { position: 'absolute', right: 0, bottom: 0, minWidth: '180px' }
+            ? { position: 'absolute', right: 0, bottom: 0, minWidth: `${EDIT_MIN_WIDTH}px` }
             : {
                 position: 'absolute',
                 top: `${editBox.top}px`,
-                left: `${editBox.left}px`,
-                width: `${editBox.width}px`,
+                right: `${editBox.right}px`,
+                width: `${boxWidth}px`,
                 minHeight: `${editBox.height}px`,
+                '--me-extra-left': `${extraLeft}px`,
               }
           return React.createElement('div', { className: 'me-root', ref: rootRef, 'data-editing': '1' },
             Original === undefined ? null : React.createElement(Original, props),

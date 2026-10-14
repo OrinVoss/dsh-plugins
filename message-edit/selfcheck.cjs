@@ -78,13 +78,37 @@ check('按轮次的行过滤', /data-chat-turn/.test(client) && /applyHiddenRows
   }
 }
 check('编辑态沿用官方气泡几何', /--dsw-radius-xl/.test(client) && /padding:9px 15px/.test(client) && /--dsh-content-font-size,14px/.test(client))
-// 编辑框宽度必须**严格等于实测气泡**：官方 .bubble 内容自适应、无 min-width，短消息就是个小气泡；
-// 一旦给编辑框加 minWidth，它会以气泡左缘向右长，右缘越出内容列压到滚动条上，贴右缘的 ✓/✕
-// 就撞上滚动条（2026-10-14 真机反馈）。minWidth 只允许出现在量不到气泡的兜底分支（那里是
-// right:0，向左生长不会越界）。
-check('编辑框不得有最小宽度（短消息会被撑宽、✓/✕ 撞滚动条）',
-  (client.match(/minWidth: '180px'/g) ?? []).length === 1
-  && /editBox === null\s*\?\s*\{ position: 'absolute', right: 0, bottom: 0, minWidth: '180px' \}/.test(client))
+// 编辑框宽度：**右缘锚定气泡右缘**，宽度 = max(气泡宽, EDIT_MIN_WIDTH)，多出的宽度全部向左长，
+// 并用 --me-extra-left 补成左内边距（文字不动）。
+// 反过来（左缘锚定 + minWidth）会让盒子向右长、右缘越出内容列，把贴右缘的 ✓/✕ 顶到滚动条上
+// （2026-10-14 真机反馈：编辑 "ok" 时盒子被撑到 172 CSS px，✕ 中心与滚动条虚线重叠）。
+// 宽度算术也跑真函数（"文字不动"依赖它）：多出的宽度 = 气泡向左扩出去的部分，
+// 原样补成左内边距，文字自然还在原处。
+{
+  const mm = /function editorBoxWidth\([\s\S]*?\n    \}/.exec(client)
+  check('找到纯函数 editorBoxWidth（宽度算术可测）', mm !== null)
+  if (mm !== null) {
+    // 纯函数引用了闭包常量 EDIT_MIN_WIDTH，按参数注入；值从 client.js 里读，避免测试里另写一份。
+    const minW = Number((/const EDIT_MIN_WIDTH = (\d+)/.exec(client) ?? [])[1] || 180)
+    // eslint-disable-next-line no-new-func
+    const editorBoxWidth = new Function('EDIT_MIN_WIDTH', `return (${mm[0]})`)(minW)
+    const j = (v) => JSON.stringify(v)
+    check('两字符气泡（58px）⇒ 盒子 180px、向左多出 122px', j(editorBoxWidth(58)) === j({ width: 180, extraLeft: 122 }))
+    check('刚好 180px 的气泡 ⇒ 不额外加宽、不补内边距', j(editorBoxWidth(180)) === j({ width: 180, extraLeft: 0 }))
+    check('比最小宽还宽的气泡（400px）⇒ 严格等于气泡', j(editorBoxWidth(400)) === j({ width: 400, extraLeft: 0 }))
+    check('极窄（12px）⇒ 仍是 180px，补偿 168px', j(editorBoxWidth(12)) === j({ width: 180, extraLeft: 168 }))
+  }
+}
+
+check('编辑框右缘锚定气泡右缘 + 最小宽度向左生长（不得用 minWidth 向右撑）',
+  /const EDIT_MIN_WIDTH = 180/.test(client)
+  && /Math\.max\(bubbleWidth, EDIT_MIN_WIDTH\)/.test(client)   // 宽度算术在纯函数里
+  && /editorBoxWidth\(editBox\.width\)/.test(client)
+  && /right: Math\.round\(rootRect\.right - rect\.right\)/.test(client)
+  && /right: `\$\{editBox\.right\}px`/.test(client)
+  && /'--me-extra-left': `\$\{extraLeft\}px`/.test(client)
+  && /padding-left:calc\(15px \+ var\(--me-extra-left,0px\)\)/.test(client)
+  && (client.match(/minWidth:/g) ?? []).length === 1)
 check('按钮几何沿用官方 action', /--dsw-radius-sm/.test(client) && /calc\(28px \+ var\(--dsh-content-font-delta/.test(client))
 check('按钮排进原生操作行（复制键右侧）', /\[data-clock="start"\]\{padding-right:calc\(72px \+ 2 \* var\(--dsh-content-font-delta/.test(client))
 check('编辑/撤回是图标钮', /IconEdit/.test(client) && /IconRetract/.test(client))
