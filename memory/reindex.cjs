@@ -68,9 +68,26 @@ if (dryRun) {
   process.exit(0)
 }
 
+// 注入预算必须与插件运行时一致：本包 patch 里配的是 maxBlockBytes: 32768 / briefInIndex: true，
+// 而 store 默认只有 20000 —— 不读配置就会用更小的预算重写 AGENTS.md，把区块末尾截断
+// （2026-10-15 实际踩到：区块被截到 19.8KB 并写下「索引超预算」提示）。
+let maxBlockBytes
+let briefInIndex
+try {
+  const cfgText = fs.readFileSync(path.join(__dirname, 'cordis.patch.yml'), 'utf8')
+  const mb = /maxBlockBytes:\s*(\d+)/.exec(cfgText)
+  if (mb) maxBlockBytes = Number(mb[1])
+  const bi = /briefInIndex:\s*(true|false)/.exec(cfgText)
+  if (bi) briefInIndex = bi[1] === 'true'
+} catch {
+  // 读不到就用 store 默认值，行为与修复前一致
+}
+
 const memStore = store.createStore({
   home,
-  agentsPath: path.join(path.dirname(home), 'AGENTS.md')
+  agentsPath: path.join(path.dirname(home), 'AGENTS.md'),
+  maxBlockBytes,
+  briefInIndex
 })
 const sync = memStore.syncAgents(null)
 console.log(`\n${changedFiles} 个索引文件被修复，共合并 ${mergedEntries} 处重复登记。`)
