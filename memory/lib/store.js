@@ -143,7 +143,7 @@ function oneLine(value) {
 function serializeEntry(meta, body) {
   const lines = ['---', `name: ${oneLine(meta.name)}`, `description: ${oneLine(meta.description)}`]
   // brief：≤12 字的压缩摘要（不是截断，是重写）。注入块优先渲染它；description 原样保留，
-  // 检索命中、详情页、索引文件里看到的仍是完整摘要。见 README §12.5
+  // 检索命中、详情页、索引文件里看到的仍是完整摘要。见 README §12.2
   if (meta.brief) lines.push(`brief: ${oneLine(meta.brief)}`)
   lines.push('metadata:', `  node_type: memory`, `  type: ${oneLine(meta.type)}`, `  scope: ${oneLine(meta.scope)}`)
   if (meta.originSessionId) lines.push(`  originSessionId: ${oneLine(meta.originSessionId)}`)
@@ -180,7 +180,7 @@ function parseEntry(text) {
 }
 
 /**
- * 读条目 frontmatter 里的 brief（≤12 字压缩摘要）。注入块用它替代长摘要，见 README §12.5。
+ * 读条目 frontmatter 里的 brief（≤12 字压缩摘要）。注入块用它替代长摘要，见 README §12.2。
  * 只读文件头 600 字节（frontmatter 一定在里面），异常一律当作"没有 brief"，不影响注入。
  */
 function readBrief(home, target) {
@@ -494,8 +494,13 @@ function createStore(options) {
     : 20000
   // 注入块里每条条目优先渲染 brief（≤12 字压缩摘要），把块体积压到一半左右、离预算上限更远。
   // brief 缺失时自动退回完整 description 摘要；briefInIndex: false 则一律用摘要（一行回滚开关）。
-  // 依据：2026-10-09 曾用"专题地图"压缩索引丢掉了逐条信息被否；本次改为**保留每条、只压摘要**。见 README §12.5
+  // 依据：2026-10-09 曾用"专题地图"压缩索引丢掉了逐条信息被否；本次改为**保留每条、只压摘要**。见 README §12.2
   const useBrief = opts.briefInIndex !== false
+  // 注入块里每组只写一次 `### 分组` 标题，行内不再重复写 `　\`分组\``（2026-10-15 实测省约 3.0KB / 14%）。
+  const groupHeadingsInIndex = opts.groupHeadingsInIndex !== false
+  // brief 已被标题覆盖（≥90% 实义字符命中标题）时不再渲染（2026-10-15 实测省约 2.2KB / 10%）；
+  // 注意**不回退**到长 description，否则等于没压。briefInIndex:false 时本开关不生效。
+  const dropRedundantBrief = opts.dropRedundantBrief !== false
   // 落盘后自动本地提交（只 commit、不 push）。默认开；home 不是 git 仓库时自动跳过。
   // 工作区记忆区块：默认写 <cwd>/AGENTS.local.md（DSH 会独立扫描 .local 变体，
   // 且它按惯例不进版本控制，避免把生成物塞进用户的仓库）。
@@ -871,12 +876,55 @@ function createStore(options) {
 
   // ------------------------------------------------------------ AGENTS.md
 
-  /** 注入块里的一行条目：优先 brief（≤12 字压缩摘要），退到完整摘要；见 README §12.5。 */
+  /**
+   * brief 是否已被标题覆盖：brief 的实义字符（汉字/字母/数字）≥90% 出现在标题里 → 写它等于重复。
+   * 例：`[VS C++ 构建工具在 F 盘，别硬编码路径] — VS 构建工具在 F 盘`。
+   */
+  function briefCoveredByTitle(title, brief) {
+    const keep = (s) => [...String(s || '')].filter((c) => /[\u3400-\u9fffA-Za-z0-9]/.test(c))
+    const t = keep(title).join('')
+    const b = keep(brief)
+    if (!t || b.length === 0) return false
+    return b.filter((c) => t.includes(c)).length / b.length >= 0.9
+  }
+
+  /** 注入块里的一行条目：优先 brief（≤12 字压缩摘要），退到完整摘要；见 README §12.2 / §12.3。 */
   function entryLine(e) {
     const brief = useBrief ? readBrief(home, e.target) : ''
-    const sum = brief || e.summary
-    return `- [${e.title}](${e.target})${sum ? ` — ${sum}` : ''}` +
-      (e.section && e.section !== DEFAULT_SECTION ? `　\`${e.section}\`` : '')
+    let sum = brief || e.summary
+    if (brief && dropRedundantBrief && briefCoveredByTitle(e.title, brief)) sum = ''
+    const sec = !groupHeadingsInIndex && e.section && e.section !== DEFAULT_SECTION
+      ? `　\`${e.section}\``
+      : ''
+    return `- [${e.title}](${e.target})${sum ? ` — ${sum}` : ''}${sec}`
+  }
+
+  /**
+   * 按预算把条目渲染成注入块正文行。
+   * · groupHeadingsInIndex 开着时，分组只写一次 `### 标题`（INDEX.md 里同组是连续的，顺序扫描即可）；
+   * · 截断按「分组标题 + 行」整块判断，不会留下只有标题没有条目的空组。
+   */
+  function renderBodyLines(entries, budget, emptyText) {
+    if (!entries.length) return { lines: [emptyText], truncated: false, omitted: 0 }
+    const size = (s) => Buffer.byteLength(s, 'utf8') + 1
+    const lines = []
+    let used = 0
+    let lastSec = null
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i]
+      const sec = e.section || DEFAULT_SECTION
+      const chunk = []
+      if (groupHeadingsInIndex && sec !== lastSec) chunk.push(`### ${sec}`)
+      chunk.push(entryLine(e))
+      const bytes = chunk.reduce((a, l) => a + size(l), 0)
+      if (used + bytes > budget && lines.length > 0) {
+        return { lines, truncated: true, omitted: entries.length - i }
+      }
+      lines.push(...chunk)
+      used += bytes
+      lastSec = sec
+    }
+    return { lines, truncated: false, omitted: 0 }
   }
 
   function buildBlock(cwd) {
@@ -897,24 +945,10 @@ function createStore(options) {
     lines.push('')
     const headerBytes = Buffer.byteLength(lines.join('\n'), 'utf8')
     const budget = Math.max(256, maxBlockBytes - headerBytes - 128)
-    const bodyLines = g.entries.length
-      ? g.entries.map(entryLine)
-      : ['（空——还没有任何记忆条目）']
-    const kept = []
-    let used = 0
-    let truncated = false
-    for (const line of bodyLines) {
-      const size = Buffer.byteLength(line, 'utf8') + 1
-      if (used + size > budget && kept.length > 0) {
-        truncated = true
-        break
-      }
-      kept.push(line)
-      used += size
-    }
-    lines.push(kept.join('\n'))
-    if (truncated) {
-      lines.push(`（索引超预算，此处省略 ${bodyLines.length - kept.length} 条；完整内容见 \`${path.join(home, INDEX_FILE)}\`）`)
+    const body = renderBodyLines(g.entries, budget, '（空——还没有任何记忆条目）')
+    lines.push(body.lines.join('\n'))
+    if (body.truncated) {
+      lines.push(`（索引超预算，此处省略 ${body.omitted} 条；完整内容见 \`${path.join(home, INDEX_FILE)}\`）`)
     }
     lines.push(BLOCK_END)
     return lines.join('\n')
@@ -959,21 +993,10 @@ function createStore(options) {
     lines.push('')
     const headerBytes = Buffer.byteLength(lines.join('\n'), 'utf8')
     const budget = Math.max(256, maxProjectBlockBytes - headerBytes - 128)
-    const bodyLines = p.entries.length
-      ? p.entries.map(entryLine)
-      : ['（空——本工作区还没有记忆条目）']
-    const kept = []
-    let used = 0
-    let truncated = false
-    for (const line of bodyLines) {
-      const size = Buffer.byteLength(line, 'utf8') + 1
-      if (used + size > budget && kept.length > 0) { truncated = true; break }
-      kept.push(line)
-      used += size
-    }
-    lines.push(kept.join('\n'))
-    if (truncated) {
-      lines.push(`（索引超预算，此处省略 ${bodyLines.length - kept.length} 条；完整内容见 \`${path.join(p.dir, PROJECT_INDEX_FILE)}\`）`)
+    const body = renderBodyLines(p.entries, budget, '（空——本工作区还没有记忆条目）')
+    lines.push(body.lines.join('\n'))
+    if (body.truncated) {
+      lines.push(`（索引超预算，此处省略 ${body.omitted} 条；完整内容见 \`${path.join(p.dir, PROJECT_INDEX_FILE)}\`）`)
     }
     lines.push(PROJECT_BLOCK_END)
     return lines.join('\n')
@@ -1026,6 +1049,8 @@ function createStore(options) {
     home,
     agentsPath,
     maxBlockBytes,
+    groupHeadingsInIndex,
+    dropRedundantBrief,
     injectProjectBlock,
     projectBlockFile,
     maxProjectBlockBytes,

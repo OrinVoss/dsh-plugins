@@ -226,6 +226,8 @@ profile 自己的 patch 仍可按 `id: memory` 覆盖 config 或 `disabled: true
 | `settingsPage` | `true` | 是否注册 `/memory-api/*` 设置页接口（没有 `webServer` 的 profile 会自动跳过） |
 | `maxBlockBytes` | `20000` | 索引区块的字节预算，超出则**从末尾截断**条目并给出指向完整索引的提示；本 profile 的 bundle patch 2026-10-04 起设为 `32768`（原 20480 已被 69 条索引顶满） |
 | `briefInIndex` | `true` | 注入块里每条只渲染 `brief`（≤12 字压缩摘要，见 §12.2）。`false` 则用完整 `description` 摘要（一行回滚开关） |
+| `groupHeadingsInIndex` | `true` | 注入块里每组只写一次 `### 分组` 标题，行内不再重复写分组标记（见 §12.3） |
+| `dropRedundantBrief` | `true` | `brief` 已被标题覆盖（≥90% 实义字符命中标题）时不再渲染，且不回退到 `description`（见 §12.3） |
 | `autoCommit` | `true` | 落盘后把记忆库**本地提交**一次（`git add -A && git commit`，**从不 push**）。home 不是 git 仓库时静默跳过；任何 git 失败都吞掉、不影响记忆写入。stdio 用 `ignore`（沙箱下管道捕获子进程输出会 EPERM）。设 `false` 关掉 |
 
 ## 6. 从 Z code 导入已有记忆
@@ -517,6 +519,23 @@ This file changed after it was loaded. Use the following content instead of the 
 **为什么不是「把摘要截断」**：截断会留半句话（`本机代理 127.0.0.1:10808 与各包管…`），价值低于重写。
 **为什么不是「只留标题」**：会丢掉「哪条才是权威条」这类判断信息——2026-10-09 的「专题地图」就是因为丢掉逐条信息被否的。
 **代价**：`brief` 要写一次（105 条那次是人工压缩的）；之后新增条目时 `memory_write` 带上 `brief` 即可。
+
+### 12.3 分组标题化 + 去重复 brief（2026-10-15 新增）
+
+**问题**：条目长到 123 条时区块 **21,239B（预算 32768 的 65%）**。拆开看：标题 7.6KB / 路径 4.7KB /
+brief 3.4KB / **分组标记 2.6KB** / 固定语法 2.1KB —— 其中两处是纯重复，删掉不丢任何信息。
+
+- **分组标记每行都写一遍**（`… — 摘要　\`交付物制作技巧\``）：某一组 35 条，组名就写了 35 次。
+  改为**每组一个 `### 分组` 标题**、行内不再写 → 省约 3.0KB（14%），分组反而更清楚。
+- **brief 被标题完全覆盖**：123 条里 67 条如此，例如
+  `[VS C++ 构建工具在 F 盘，别硬编码路径] — VS 构建工具在 F 盘`、
+  `[llama.cpp 构建选择（RTX 5070 必须 CUDA 13.4）与初始化故障排查] — CUDA 必须 13.4`。
+  判定：brief 的实义字符（汉字/字母/数字）**≥90% 出现在标题里** → 该行不再渲染 brief，
+  且**不回退**到长 `description`（否则等于没压）→ 省约 2.2KB（10%）。
+
+- **开关**：`groupHeadingsInIndex` / `dropRedundantBrief` 默认都是 `true`，一行可回滚。
+- **实测**：**21,239B → 16027B**（预算余量 35% → 49%）。
+- **不压标题**：标题截到 12 字能再省 7KB，但那是真丢信息 —— 2026-10-09「专题地图」被否的正是这个方向。
 
 ## 13. 自动提交（`autoCommit`）
 

@@ -14,6 +14,10 @@
         # 注入块里每条只渲染 brief（≤12 字压缩摘要）：区块 29KB→18KB，离预算上限的余量从 10% 变成 45%。
         # 关掉（false）退回完整 description 摘要 —— 一行回滚开关。见 README §12.2
         briefInIndex: true
+        # 注入块里每组只写一次 `### 分组` 标题，行内不再重复写分组标记（2026-10-15：区块 −3.0KB）
+        groupHeadingsInIndex: true
+        # brief 已被标题覆盖时不再重复渲染，且不回退到长 description（2026-10-15：区块 −2.2KB）
+        dropRedundantBrief: true
         autoCommit: true
         # 工作区记忆区块：写进会话工作区自己的指令文件（DSH 会读 AGENTS.md / AGENTS.local.md）。
         # 默认 AGENTS.local.md —— 独立生效，且按惯例不进版本控制；想让它进仓库就改成 AGENTS.md。
