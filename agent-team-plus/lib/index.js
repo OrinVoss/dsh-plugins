@@ -597,7 +597,8 @@ var TeamRoster = class {
 	* @param childIds - selected roster child ids.
 	*/
 	async stopTeammates(root, childIds) {
-		await this.lifecycle.withTimeout(this.ctx.subagents.drainContinuableChildren(root, childIds));
+		/* DSH 0.2.1-rc.1 把 drainContinuableChildren 改名为 drainChildren（旧名已移除）。 */
+		await this.lifecycle.withTimeout(this.ctx.subagents.drainChildren(root, childIds));
 	}
 	/** Perform one creation admitted before the Team runtime disposal cutoff. */
 	async spawnAdmitted(caller, request) {
@@ -629,7 +630,10 @@ var TeamRoster = class {
 		});
 		let started;
 		try {
-			started = await this.ctx.subagents.startContinuable({
+			/* DSH 0.2.1-rc.1 把 startContinuable 改名为 startActivation（旧名已移除），
+			 * spec 一致，delivery 省略即默认 "parent"；这里显式写出与官方 profile 对齐。 */
+			started = await this.ctx.subagents.startActivation({
+				delivery: "parent",
 				childId,
 				provider: request.provider,
 				label: description,

@@ -8,8 +8,8 @@
 import { TeamId, TeamMessageId, TeamService, TeamTaskId } from "../lib/index.js";
 import { TEST_DESCRIPTOR_EVENT } from "@deepseek-ai/dsh-subagent";
 
-/** 让 spawn 走到 startContinuable 就抛出的哨兵：用它证明前面的门禁都过了。 */
-export const START_SENTINEL = new Error("SENTINEL_START_CONTINUABLE_REACHED");
+/** 让 spawn 走到 startActivation 就抛出的哨兵：用它证明前面的门禁都过了。 */
+export const START_SENTINEL = new Error("SENTINEL_START_ACTIVATION_REACHED");
 
 export function createHarness(options = {}) {
 	const handlers = new Map();
@@ -17,7 +17,7 @@ export function createHarness(options = {}) {
 	const states = new Map();
 	const warnings = [];
 	const calls = {
-		startContinuable: [],
+		startActivation: [],
 		interrupts: [],
 		drains: []
 	};
@@ -65,15 +65,18 @@ export function createHarness(options = {}) {
 			list: () => [...agents.values()]
 		},
 		subagents: {
-			async startContinuable(request) {
-				calls.startContinuable.push(request);
+			/* 与 DSH 0.2.1-rc.1 的真实 `ctx.subagents` 面保持一致：
+			 * startActivation / drainChildren（0.2.0-rc.2 的 startContinuable /
+			 * drainContinuableChildren 已被上游删除）。 */
+			async startActivation(request) {
+				calls.startActivation.push(request);
 				if (startFailure !== null) throw startFailure;
 				return { messageId: `started-${request.childId}` };
 			},
 			interrupt(id, payload) {
 				calls.interrupts.push({ id, payload });
 			},
-			async drainContinuableChildren(root, childIds) {
+			async drainChildren(root, childIds) {
 				calls.drains.push({ rootId: root.id, childIds: [...childIds] });
 			}
 		}
