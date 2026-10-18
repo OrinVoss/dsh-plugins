@@ -131,6 +131,8 @@ function applyInner(ctx, config) {
     agentsPath: cfg.agentsPath,
     maxBlockBytes: cfg.maxBlockBytes,
     briefInIndex: cfg.briefInIndex,
+    groupHeadingsInIndex: cfg.groupHeadingsInIndex,
+    dropRedundantBrief: cfg.dropRedundantBrief,
     autoCommit: cfg.autoCommit,
     injectProjectBlock: cfg.injectProjectBlock,
     projectBlockFile: cfg.projectBlockFile,

@@ -40,9 +40,14 @@ test("lib 下每个裸导入都在 peerDependencies 里", () => {
 	assert.deepEqual(missing, [], "缺少 peerDependencies 会让运行时解析退回本包 node_modules");
 });
 
-test("dsh-* peer 精确钉在 0.2.0-rc.2（DSH 升级时 bundle 自动跳过而不是崩）", () => {
+test("dsh-* peer 只放行已核验的精确版本白名单（未核验版本让 bundle 自动跳过而不是崩）", () => {
 	for (const [name, range] of Object.entries(manifest.peerDependencies)) {
-		if (name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-")) assert.equal(range, "0.2.0-rc.2", `${name} 应为精确版本`);
+		if (name !== "@deepseek-ai/dsh" && !name.startsWith("@deepseek-ai/dsh-")) continue;
+		const alternatives = range.split("||").map((part) => part.trim()).filter(Boolean);
+		assert.ok(alternatives.length > 0, `${name} 的 peer 白名单为空`);
+		for (const alternative of alternatives) {
+			assert.match(alternative, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, `${name} 的 "${alternative}" 必须是精确版本（不允许 ^ ~ >= 之类范围符）`);
+		}
 	}
 });
 

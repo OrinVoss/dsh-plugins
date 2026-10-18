@@ -210,6 +210,33 @@ check('注入块优先渲染 brief，缺失退回 description；briefInIndex:fal
   assert.match(raw, /description: 换个摘要/)
 })
 
+check('注入块：分组只写一个标题；与标题重复的 brief 不再渲染（2026-10-15）', () => {
+  const gHome = path.join(root, 'group-home')
+  const gs = storeLib.createStore({ home: gHome, agentsPath: path.join(root, 'group-AGENTS.md'), maxBlockBytes: 20000 })
+  gs.write('global', { name: 'grp/a', title: 'A 条目', description: 'A 的长摘要', section: '甲组', body: '正文' }, cwd)
+  gs.write('global', { name: 'grp/b', title: 'B 条目', description: 'B 的长摘要', section: '甲组', body: '正文' }, cwd)
+  gs.write('global', { name: 'grp/c', title: 'C 条目', description: 'C 的长摘要', section: '乙组', body: '正文' }, cwd)
+  const block = gs.buildBlock(null)
+  assert.equal((block.match(/^### 甲组$/gm) || []).length, 1, '甲组标题应只出现一次')
+  assert.equal((block.match(/^### 乙组$/gm) || []).length, 1, '乙组标题应只出现一次')
+  assert.ok(!block.includes('甲组`'), '行内不应再写分组标记')
+
+  const rHome = path.join(root, 'redundant-home')
+  const rs = storeLib.createStore({ home: rHome, agentsPath: path.join(root, 'redundant-AGENTS.md'), maxBlockBytes: 20000 })
+  rs.write('global', { name: 'red/x', title: 'VS C++ 构建工具在 F 盘，别硬编码路径', description: '长摘要甲', brief: 'VS 构建工具在 F 盘', body: '正文' }, cwd)
+  rs.write('global', { name: 'red/y', title: '代理设置', description: '长摘要乙', brief: '代理 10808 端口', body: '正文' }, cwd)
+  const rb = rs.buildBlock(null)
+  assert.ok(!rb.includes('VS 构建工具在 F 盘'), '与标题重复的 brief 不该渲染')
+  assert.ok(!rb.includes('长摘要甲'), '也不该退回长 description')
+  assert.match(rb, /red\/y\.md\) — 代理 10808 端口/, '不重复的 brief 照常渲染')
+
+  const off = storeLib.createStore({ home: gHome, agentsPath: path.join(root, 'group-AGENTS.md'), maxBlockBytes: 20000, groupHeadingsInIndex: false, dropRedundantBrief: false }).buildBlock(null)
+  assert.ok(!off.includes('### 甲组'), 'groupHeadingsInIndex:false 不该有分组标题')
+  assert.ok(off.includes('甲组`'), 'groupHeadingsInIndex:false 应回到行内分组标记')
+  const off2 = storeLib.createStore({ home: rHome, agentsPath: path.join(root, 'redundant-AGENTS.md'), maxBlockBytes: 20000, dropRedundantBrief: false }).buildBlock(null)
+  assert.ok(off2.includes('VS 构建工具在 F 盘'), 'dropRedundantBrief:false 应保留重复 brief')
+})
+
 check('同 section 第二条追加在既有条目之后', () => {
   store.write('global', {
     name: 'preferences/keep-readmes-in-sync',

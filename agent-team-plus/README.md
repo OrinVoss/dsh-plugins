@@ -7,7 +7,8 @@ DSH Agent Teams 的**本地 fork 组合包**：在官方 `@deepseek-ai/dsh-exper
 2. **新增 `release_teammate` 工具**：成员干完活后由 Lead 让它「散伙」——成员从名册消失、
    名额与名字立刻可复用，之后可以 `spawn_teammate` 雇新的（同名也行）。
 
-上游基线：`0.2.0-rc.2`（域服务 / 工具层 / Web 看板三包源码逐文件对照抄改，只改下面列出的点）。
+上游基线：代码是 `0.2.0-rc.2` 的（域服务 / 工具层 / Web 看板三包源码逐文件对照抄改，只改下面列出的点）；
+运行基线已适配 `0.2.1-rc.1` / `0.2.1-rc.2`（上游把 2 个 `ctx.subagents` 方法名改了，见第 3 节）。
 
 ---
 
@@ -100,8 +101,14 @@ git 里、无法回退），以及「我们被版本判定跳过时要有官方�
 （对象身份一致，Cordis `Service` 基类不会出现两份）。
 `test/manifest.test.mjs` 会静态守住这条：**lib 下任何裸导入如果没写进 peers，测试直接挂**。
 
-`dsh-*` peer 一律**精确钉** `0.2.0-rc.2`：DSH 升级后版本不匹配 → 本 bundle 被判定不兼容而
-**自动跳过**（只打一条 skip 警告），官方 8 人团队原样接管，不会把桌面端起不来。
+`dsh-*` peer 用**已核验版本白名单**：`0.2.1-rc.1 || 0.2.1-rc.2`（只放行我实际核对过运行时代码的版本）。
+
+- 命中白名单 → 正常加载；
+- 白名单外的版本 → 本 bundle 被判定不兼容而**自动跳过**（只打一条 skip 警告），官方 8 人团队原样接管，不会把桌面端起不来；
+- **为什么不用裸范围**（`~0.2.1-rc.1`）：那样任何 nightly 都会加载，上游真改 API 时变成**加载后硬崩**（`spawn_teammate` 直接 TypeError）而不是静默退场；
+- 代价：每次 DSH 升级要手动把新版本号加进白名单（下一节 SOP 第 4 步），大约一分钟。
+
+⚠️ nightly 通道一天可能出好几个 rc，只差 `package.json` 版本号的那种（代码零改动）照样会让「精确单版本」失效——2026-10-17 一天内就从 rc.1 跳到 rc.2，所以改成白名单。
 重对齐见下一节。
 
 ---
@@ -124,7 +131,9 @@ git 里、无法回退），以及「我们被版本判定跳过时要有官方�
    `@deepseek-ai/dsh-experimental-tool-agent-team/lib/index.js`。
 3. 把第 1 节表格里的 4 处改动重新打到新版源码上（改动都是**局部**的：枚举、折叠分支、
    两个新方法、一个邮箱防护、一个工具注册、一段 POLICY）。
-4. 更新 `package.json` 的 `version` 和 4 个 `@deepseek-ai/dsh-*` peer 到新版本号。
+4. 把 4 个 `@deepseek-ai/dsh-*` peer 的白名单**追加**新版本号（形如 `0.2.1-rc.1 || 0.2.1-rc.2`）：
+   旧的已验证版本保留，尚未升级的会话不会被连带打掉。顺手确认 `ctx.subagents` 的方法名
+   （0.2.1 把 `startContinuable`→`startActivation`、`drainContinuableChildren`→`drainChildren`）。
 5. 跑 `pnpm test`（等价于 `node test/setup.mjs && node test/run.mjs`）——测试里有
    「peers 完整」「patch 形状」「折叠规则」「散伙门禁」等断言。
 6. 重启桌面端，按第 6 节清单过一遍。
