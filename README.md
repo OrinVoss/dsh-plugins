@@ -2,7 +2,7 @@
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-7c3aed.svg)](https://github.com/topics/dsh-plugin)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2%2B-4f46e5.svg)](https://github.com/topics/dsh-plugin)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--rc.2-4f46e5.svg)](https://github.com/topics/dsh-plugin)
 
 九个跑在 [DeepSeek Harness](https://github.com/topics/dsh-plugin)（DSH）桌面端里的**社区插件包**：
 长期记忆、桌面宠物、GUI 皮肤、Token 用量报表、系统状态、旁支提问、消息撤回/编辑，以及给官方
@@ -41,8 +41,10 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 
 ### 前置
 
-- **DSH 桌面端 ≥ 0.2.0**（0.2.0 起旧 `.agent-presets/` 机制废除，插件走 bundle 声明）。
-  各包按 `0.2.0-rc.2` 的宿主契约开发与验证。
+- **DSH 桌面端 ≥ 0.2.0**（0.2.0 起旧 `.agent-presets/` 机制废除，插件走 bundle 声明）；
+  各包按 **0.2.1-rc.1 / rc.2** 的宿主契约开发与验证（本机跑的是 0.2.1-rc.2）。
+  `agent-team-plus` 的 peer 走「**已核验版本白名单**」（`0.2.1-rc.1 || 0.2.1-rc.2`）：未核验的
+  DSH 版本会被明确拦下，而不是整个组合包被**静默跳过**。
 - 插件跑在 DSH 自带运行时里，**不需要**系统 Node / pnpm。
 - 本仓库**不打包**任何 `@deepseek-ai/*` 依赖，由你本机的 DSH 安装提供。
 
@@ -134,13 +136,19 @@ cd <包目录>; npm test          # 有 test 脚本的包
 
 | 层级 | 写进哪 | 内容 |
 | --- | --- | --- |
-| **全局索引** | `~/.dsh/AGENTS.md` 的托管区块（`<!-- dsh-memory:begin/end -->`） | 全部条目**每条一行**，默认渲染该条目的 `brief`（**≤12 字压缩摘要**）；预算 `maxBlockBytes`，本机设 32 KB；所有工作区共用 |
+| **全局索引** | `~/.dsh/AGENTS.md` 的托管区块（`<!-- dsh-memory:begin/end -->`） | 全部条目**每条一行**：**每组一个 `### 分组` 标题**（行内不再重复写组名），每行渲染该条目的 `brief`（**≤12 字压缩摘要**，与标题重复的那些会省略）；预算 `maxBlockBytes`，本机设 32 KB；所有工作区共用 |
 | **工作区索引** | 会话工作区自己的 **`AGENTS.local.md`** 托管区块（`injectProjectBlock`） | 只放**本工作区**的项目条目，预算独立（`maxProjectBlockBytes`，默认 8 KB）；默认文件不进版本控制，想进仓库就把 `projectBlockFile` 改成 `AGENTS.md` |
 
 > 2026-10-11：注入块改用 `brief` 之后，本机实测从 **29,293 B → 18,151 B（−38%）**，离 32 KB 预算的余量
 > 由 10% 拉到 45%（此前再写十几条就会从末尾**静默截断**）。`brief` 是**存下来的压缩摘要**（`memory_write`
 > 的可选参数，≤12 汉字），不是渲染时切字符串——所以超长摘要会被**重写**而不是截断。`briefInIndex: false`
 > 一行回滚成完整 `description` 摘要。
+>
+> 2026-10-15：又做了两处**零信息损失**压缩——**分组标题化**（组名从「每行写一遍」改成「每组一个
+> `### 分组` 标题」）与**省略被标题覆盖的 brief**（brief 的实义字符 ≥90% 命中标题时不渲染，且
+> **不回退**到长 `description`）。本机实测 **21,239 B → 16,027 B**，预算余量 35% → 49%。
+> 两个开关 `groupHeadingsInIndex` / `dropRedundantBrief` 默认开、一行可回滚。
+> **没有压标题**——标题截短能再省 7 KB，但那是真丢信息（正是 2026-10-09「专题地图」被否掉的方向）。
 >
 > 2026-10-09 还试过把这套注入换成三条「随插件销毁」的扩展点（专题地图 + 按需检索 + 压缩保护），
 > 实测**专题地图会丢信息**，已整体回退到上面的文件区块方案，相关代码不再保留。
@@ -369,7 +377,8 @@ self-check scripts and hard-won gotchas:
 `release_teammate` tool).
 
 Install any package with `plugin_manager → install_bundle` pointing at its absolute
-directory, then **restart the desktop app** for client-side plugins. Requires DSH ≥ 0.2.0.
+directory, then **restart the desktop app** for client-side plugins. Validated on DSH 0.2.1-rc.1 /
+rc.2 (`agent-team-plus` pins a *verified-version allowlist* instead of a single exact version).
 Licensed MIT; `agent-team-plus` retains DeepSeek's upstream MIT notice.
 
 ---
