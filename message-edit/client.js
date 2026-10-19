@@ -54,7 +54,8 @@ window.__ModuleLoader__.load({
     const CLOSE_MS = 150
     /**
      * 编辑框最小宽度。气泡比它窄时，多出来的宽度**全部向左长**（右缘锚定气泡右缘），
-     * 并用 `--me-extra-left` 补成左内边距——这样 ✓/✕ 不会越出内容列，文字也一个像素不动。
+     * 这样 ✓/✕ 不会越出内容列；文本区铺满整个盒子（不要把多出的宽度再补成左内边距，
+     * 那会把短消息挤成每行 5 个字——2026-10-19 真机反馈）。
      */
     const EDIT_MIN_WIDTH = 180
 
@@ -155,8 +156,6 @@ window.__ModuleLoader__.load({
   border:1px solid var(--dsw-alias-state-business-primary,#4d6bfe);
   border-radius:var(--dsw-radius-xl);
   padding:9px 15px;color:var(--dsw-alias-label-primary);
-  /* 盒子比气泡宽时，多出的宽度补成左内边距 ⇒ 文字仍在原气泡那一格（见 EDIT_MIN_WIDTH） */
-  padding-left:calc(15px + var(--me-extra-left,0px));
   font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));
   display:flex;flex-direction:column}
 .me-editor-input{box-sizing:border-box;width:100%;margin:0;padding:0;
@@ -306,19 +305,54 @@ window.__ModuleLoader__.load({
       console.error(`[${ID}] ${where}: ${message}`)
     }
 
+    /** 透明/无填充色的判断（`background-color` 的三种"没底色"写法）。 */
+    function hasFill(background) {
+      return background !== undefined && background !== null && background !== ''
+        && background !== 'transparent' && background !== 'rgba(0, 0, 0, 0)'
+    }
+
     /**
-     * 纯函数：由实测气泡宽度算编辑框宽度与左内边距补偿。
+     * 纯函数：从候选块里挑出**气泡**，返回它的 rect（挑不到返回 null）。
      *
-     * 宽度 = max(气泡宽, EDIT_MIN_WIDTH)——多出来的部分**向左长**（右缘锚定气泡右缘），
-     * 并且用同样大小的左内边距补回来，所以文字仍在原气泡那一格，一个像素都不动。
-     * 独立成纯函数是为了让 selfcheck 直接跑真代码（"文字不动"就靠这个减法）。
+     * 规则：有填充色 → 其中 `text` 含消息开头（probe）的里**面积最小**者胜（文字 span 没底色会被
+     * 跳过、祖先块面积更大不会被选中，剩下的就是气泡本体）；一个都没命中就退回**面积最大**者。
+     * 独立成纯函数是为了让 selfcheck 用合成候选跑真代码——"别按 DOM 层级猜"这条教训值得有算例。
+     *
+     * @param candidates - [{ rect, background, text }]。
+     * @param probe - 消息开头（最多 12 字），空串表示只按面积兜底。
+     */
+    function pickBubbleRect(candidates, probe) {
+      let bubble = null
+      let bubbleArea = Infinity
+      let biggest = null
+      let biggestArea = 0
+      for (const item of Array.isArray(candidates) ? candidates : []) {
+        if (item === null || typeof item !== 'object' || !hasFill(item.background)) continue
+        const rect = item.rect
+        if (rect === undefined || rect === null || rect.width <= 0 || rect.height <= 0) continue
+        const area = rect.width * rect.height
+        if (area > biggestArea) { biggestArea = area; biggest = rect }
+        if (probe !== '' && typeof item.text === 'string' && item.text.indexOf(probe) !== -1 && area < bubbleArea) {
+          bubbleArea = area
+          bubble = rect
+        }
+      }
+      return bubble !== null ? bubble : biggest
+    }
+
+    /**
+     * 纯函数：由实测气泡宽度算编辑框宽度 = max(气泡宽, EDIT_MIN_WIDTH)。
+     * 盒子右缘锚定气泡右缘，所以多出来的宽度**全部长在左边**（不会越出内容列、不挤滚动条）。
+     *
+     * ⚠️ 2026-10-19 教训：**不要**再把多出的宽度用左内边距补回去（那是为了"文字一个像素不动"）。
+     * 那样文本区只剩气泡本身的宽度，一条 17 字的消息会挤成每行 5 个字（真机截图），根本没法编辑。
+     * 现在文本区铺满整个盒子；只有"气泡本身比 180px 还窄"时文字才会向左铺开。
      *
      * @param bubbleWidth - 实测气泡宽度（CSS px）。
-     * @returns { width, extraLeft }
+     * @returns 编辑框宽度（CSS px）。
      */
     function editorBoxWidth(bubbleWidth) {
-      const width = Math.max(bubbleWidth, EDIT_MIN_WIDTH)
-      return { width, extraLeft: width - bubbleWidth }
+      return Math.max(bubbleWidth, EDIT_MIN_WIDTH)
     }
 
     // ------------------------------------------------------------------ 行过滤
@@ -563,41 +597,38 @@ window.__ModuleLoader__.load({
         const Original = resolveOriginal('user')
 
         /**
-         * 量出当前气泡的实测盒子（相对 .me-root 的 top/left + 宽高）。
+         * 量出当前气泡的实测盒子（相对 .me-root 的 top/left + 宽高 + 到右缘的距离）。
          *
-         * 为什么要实测而不是靠 CSS：官方气泡是 shrink-to-fit 的（`.userStack` 限宽、气泡按内容
-         * 收缩），只有量出来才能"原地无缝"。
+         * 为什么要实测：官方气泡是 shrink-to-fit 的（`.userStack` 限宽、气泡按内容收缩），
+         * 只有量出来才能"原地无缝"。
          *
-         * 为什么用"背景色非透明"来找气泡：附件行与引用摘要都是透明的，只有 `.bubble` 有填充色
-         * （`--dsw-specific-bubble`）。这样不用碰官方那套哈希类名。
+         * 怎么认气泡（2026-10-19 重写）：**按消息文本找**——在 `.me-root` 子树里扫所有**有填充色**
+         * 的元素（`--dsw-specific-bubble`；附件行/引用摘要都是透明的），取「textContent 里含本条消息
+         * 开头」的那个里**面积最小**的：文字 span 没有底色会被跳过，祖先块面积更大不会被选中，
+         * 剩下的就是气泡本体。兜底才是"面积最大的有底色块"。
+         *
+         * ⚠️ 不要再按 DOM 层级猜（"root → 第一个子元素 → 再第一个子元素 → 第一个有底色的孩子"）：
+         * 官方一旦在中间加一层包装（或附件行 / 操作行先出现）就会量到**别的块**。真机出现过
+         * 一条 17 字的消息量出约 103px，编辑框被压到最小宽、文本区只剩 5 字宽（2026-10-19 反馈）。
+         *
+         * @param messageText - 本条消息的纯文本（只用来认气泡，不参与渲染）。
          */
-        const measureBubbleBox = React.useCallback(() => {
+        const measureBubbleBox = React.useCallback((messageText) => {
           const root = rootRef.current
           if (root === null) return null
-          const row = root.firstElementChild
-          const stack = row === null ? null : row.firstElementChild
-          if (stack === null) return null
-          let bubble = null
-          for (const child of stack.children) {
-            const style = window.getComputedStyle(child)
-            const background = style.backgroundColor
-            if (background !== '' && background !== 'transparent' && background !== 'rgba(0, 0, 0, 0)') {
-              bubble = child
-              break
-            }
-          }
-          if (bubble === null) {
-            // 兜底：取面积最大的子元素（气泡通常就是最大块）。
-            let area = 0
-            for (const child of stack.children) {
-              const rect = child.getBoundingClientRect()
-              if (rect.width * rect.height > area) { area = rect.width * rect.height; bubble = child }
-            }
-          }
-          if (bubble === null) return null
           const rootRect = root.getBoundingClientRect()
-          const rect = bubble.getBoundingClientRect()
-          if (rect.width <= 0 || rect.height <= 0) return null
+          const probe = typeof messageText === 'string' ? messageText.replace(/\s+/g, ' ').trim().slice(0, 12) : ''
+          const candidates = []
+          for (const el of root.querySelectorAll('*')) {
+            if (el.closest('.me-editor') !== null || el.closest('.me-actions') !== null) continue
+            candidates.push({
+              rect: el.getBoundingClientRect(),
+              background: window.getComputedStyle(el).backgroundColor,
+              text: el.textContent,
+            })
+          }
+          const rect = pickBubbleRect(candidates, probe)
+          if (rect === null) return null
           return {
             top: Math.round(rect.top - rootRect.top),
             left: Math.round(rect.left - rootRect.left),
@@ -609,7 +640,7 @@ window.__ModuleLoader__.load({
         }, [])
 
         const beginEdit = React.useCallback(() => {
-          setEditBox(measureBubbleBox())
+          setEditBox(measureBubbleBox(originalText))
           setDraft(originalText)
           setClosing(false)
           setEditing(true)
@@ -729,10 +760,9 @@ window.__ModuleLoader__.load({
           //     右缘越出内容列扎进应用滚动条区域，而 ✓/✕ 贴着盒子右缘（right:0），✕ 正好压在滚动条上
           //     （真机截图实测：编辑 "ok" 时盒子 172 CSS px、✕ 中心与滚动条虚线重叠）；
           //   · 右缘锚定后，多出的宽度长在左边（右侧本来就是空白），✓/✕ 回到官方操作行那一列；
-          //   · 多出的宽度再用 --me-extra-left 补成左内边距 ⇒ 文字仍在原气泡那一格，一个像素不动。
-          const sized = editBox === null ? { width: EDIT_MIN_WIDTH, extraLeft: 0 } : editorBoxWidth(editBox.width)
-          const boxWidth = sized.width
-          const extraLeft = sized.extraLeft
+          //   · 多出的宽度全部长在左边；文本区**铺满盒子**（早先把它用左内边距压掉，短消息会被挤成
+          //     每行 5 个字，2026-10-19 真机反馈）。
+          const boxWidth = editBox === null ? EDIT_MIN_WIDTH : editorBoxWidth(editBox.width)
           const boxStyle = editBox === null
             ? { position: 'absolute', right: 0, bottom: 0, minWidth: `${EDIT_MIN_WIDTH}px` }
             : {
@@ -741,7 +771,6 @@ window.__ModuleLoader__.load({
                 right: `${editBox.right}px`,
                 width: `${boxWidth}px`,
                 minHeight: `${editBox.height}px`,
-                '--me-extra-left': `${extraLeft}px`,
               }
           return React.createElement('div', { className: 'me-root', ref: rootRef, 'data-editing': '1' },
             Original === undefined ? null : React.createElement(Original, props),
