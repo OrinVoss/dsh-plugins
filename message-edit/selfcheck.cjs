@@ -82,8 +82,7 @@ check('编辑态沿用官方气泡几何', /--dsw-radius-xl/.test(client) && /pa
 // 并用 --me-extra-left 补成左内边距（文字不动）。
 // 反过来（左缘锚定 + minWidth）会让盒子向右长、右缘越出内容列，把贴右缘的 ✓/✕ 顶到滚动条上
 // （2026-10-14 真机反馈：编辑 "ok" 时盒子被撑到 172 CSS px，✕ 中心与滚动条虚线重叠）。
-// 宽度算术也跑真函数（"文字不动"依赖它）：多出的宽度 = 气泡向左扩出去的部分，
-// 原样补成左内边距，文字自然还在原处。
+// 宽度算术也跑真函数：max(气泡宽, 最小宽)，多出的部分向左长。
 {
   const mm = /function editorBoxWidth\([\s\S]*?\n    \}/.exec(client)
   check('找到纯函数 editorBoxWidth（宽度算术可测）', mm !== null)
@@ -93,10 +92,37 @@ check('编辑态沿用官方气泡几何', /--dsw-radius-xl/.test(client) && /pa
     // eslint-disable-next-line no-new-func
     const editorBoxWidth = new Function('EDIT_MIN_WIDTH', `return (${mm[0]})`)(minW)
     const j = (v) => JSON.stringify(v)
-    check('两字符气泡（58px）⇒ 盒子 180px、向左多出 122px', j(editorBoxWidth(58)) === j({ width: 180, extraLeft: 122 }))
-    check('刚好 180px 的气泡 ⇒ 不额外加宽、不补内边距', j(editorBoxWidth(180)) === j({ width: 180, extraLeft: 0 }))
-    check('比最小宽还宽的气泡（400px）⇒ 严格等于气泡', j(editorBoxWidth(400)) === j({ width: 400, extraLeft: 0 }))
-    check('极窄（12px）⇒ 仍是 180px，补偿 168px', j(editorBoxWidth(12)) === j({ width: 180, extraLeft: 168 }))
+    check('两字符气泡（58px）⇒ 盒子取最小宽 180px', editorBoxWidth(58) === 180)
+    check('刚好 180px 的气泡 ⇒ 宽度不变', editorBoxWidth(180) === 180)
+    check('比最小宽还宽的气泡（400px）⇒ 严格等于气泡', editorBoxWidth(400) === 400)
+    check('极窄（12px）⇒ 仍是 180px', editorBoxWidth(12) === 180)
+  }
+}
+
+// 挑气泡的纯函数：合成候选跑真代码（2026-10-19 的 bug 就是"按 DOM 层级猜"猜到了别的块）
+{
+  const pm = /function pickBubbleRect\([\s\S]*?\n    \}/.exec(client)
+  check('找到纯函数 pickBubbleRect（挑气泡可测）', pm !== null)
+  if (pm !== null) {
+    // pickBubbleRect 依赖同作用域的 hasFill，把**真 hasFill** 注入进来（都跑真代码）。
+    const hm = /function hasFill\([\s\S]*?\n    \}/.exec(client)
+    check('找到纯函数 hasFill', hm !== null)
+    // eslint-disable-next-line no-new-func
+    const hasFill = new Function(`return (${hm[0]})`)()
+    // eslint-disable-next-line no-new-func
+    const pickBubbleRect = new Function('hasFill', `return (${pm[0]})`)(hasFill)
+    const box = (w, h) => ({ width: w, height: h })
+    const bubble = { rect: box(240, 42), background: 'rgb(1, 2, 3)', text: '现在正常了，你无需测试了' }
+    const actions = { rect: box(100, 28), background: 'transparent', text: '' }
+    const chip = { rect: box(80, 24), background: 'rgb(9, 9, 9)', text: '工作区内修改' }
+    const wrap = { rect: box(700, 500), background: 'rgb(1, 2, 3)', text: '现在正常了，你无需测试了' }
+    check('只有气泡时选气泡', pickBubbleRect([bubble], '现在正常了') === bubble.rect)
+    check('透明块（操作行）不会被选中', pickBubbleRect([actions, bubble], '现在正常了') === bubble.rect)
+    check('祖先块也含文字时选**面积最小**的（气泡本体）', pickBubbleRect([wrap, bubble], '现在正常了') === bubble.rect)
+    check('全都透明时返回 null', pickBubbleRect([actions], '现在正常了') === null)
+    check('无候选时返回 null', pickBubbleRect([], '现在正常了') === null)
+    check('probe 为空时退回面积最大的有底色块',
+      pickBubbleRect([chip, bubble], '') === bubble.rect)
   }
 }
 
@@ -106,8 +132,12 @@ check('编辑框右缘锚定气泡右缘 + 最小宽度向左生长（不得用 
   && /editorBoxWidth\(editBox\.width\)/.test(client)
   && /right: Math\.round\(rootRect\.right - rect\.right\)/.test(client)
   && /right: `\$\{editBox\.right\}px`/.test(client)
-  && /'--me-extra-left': `\$\{extraLeft\}px`/.test(client)
-  && /padding-left:calc\(15px \+ var\(--me-extra-left,0px\)\)/.test(client)
+  // 文本区必须铺满盒子（2026-10-19：曾用左内边距把多出的宽度补回去，短消息被挤成每行 5 个字）
+  && !/--me-extra-left/.test(client)
+  && /measureBubbleBox\(originalText\)/.test(client)
+  // 按消息文本认气泡，而不是按 DOM 层级猜（层级一变就会量到别的块）
+  && /indexOf\(probe\) !== -1/.test(client)
+  && /el\.closest\('\.me-editor'\)/.test(client)
   && (client.match(/minWidth:/g) ?? []).length === 1)
 check('按钮几何沿用官方 action', /--dsw-radius-sm/.test(client) && /calc\(28px \+ var\(--dsh-content-font-delta/.test(client))
 check('按钮排进原生操作行（复制键右侧）', /\[data-clock="start"\]\{padding-right:calc\(72px \+ 2 \* var\(--dsh-content-font-delta/.test(client))
