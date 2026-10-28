@@ -78,6 +78,36 @@ const MAX_SHADOW_NODES = 4000
 const CHECKS_VERSION = 2
 
 /**
+ * 纯函数：编辑重发时**保留原消息的非文本内容块**（图片 / 文件等），只把文字换掉。
+ *
+ * ⚠️ 2026-10-28 真机反馈的严重 bug：编辑时 prompt 只发了 `[{type:'text', text}]`，
+ * 原消息里的图片全被丢掉。编辑的语义是"改这段文字、其余照旧"，所以必须把非 text 块原样带上。
+ * 规则：按原顺序保留所有非 text 块；第一个 text 块的位置换成新文字；其余 text 块丢掉
+ * （编辑器里编辑的就是拼起来的那一整段文字）；原消息没有 text 块时把新文字追加在末尾。
+ *
+ * @param originalContent - 原消息的 content 数组。
+ * @param text - 编辑后的文字。
+ * @returns 新的 content 数组。
+ */
+function rebuildEditedContent(originalContent, text) {
+  const blocks = Array.isArray(originalContent) ? originalContent : []
+  const out = []
+  let placed = false
+  for (const block of blocks) {
+    if (block !== null && typeof block === 'object' && block.type === 'text') {
+      if (!placed) {
+        out.push({ type: 'text', text })
+        placed = true
+      }
+      continue
+    }
+    out.push(block)
+  }
+  if (!placed) out.push({ type: 'text', text })
+  return out
+}
+
+/**
  * `sourceEventSeqs` 是区间编码（seq 或 [start,end]），摊平后才能查轮次。
  * @param value - 事件上的 sourceEventSeqs。
  * @returns 升序去重的 seq 数组。
@@ -346,12 +376,14 @@ module.exports = {
           try {
             // ⚠️ signal 必须是**真的** AbortSignal：prompt 内部会调 signal.throwIfAborted()，
             // 传 undefined 会抛 "Cannot read properties of undefined (reading 'throwIfAborted')"。
+            // 重发时**带上原消息的图片/文件等内容块**，只替换文字（否则编辑一次就把附件丢了）。
+            const targetData = target.data !== null && typeof target.data === 'object' ? target.data : {}
             await controller.prompt(
               {
                 requestId: randomUUID(),
                 sessionId,
                 mode: 'queue',
-                content: [{ type: 'text', text }],
+                content: rebuildEditedContent(targetData.content, text),
               },
               AbortSignal.timeout(60_000),
             )

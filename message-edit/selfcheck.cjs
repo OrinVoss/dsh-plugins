@@ -192,6 +192,30 @@ check('package.json 不再自带 bundle（它是拓展包的成员）', !(pkg.ds
 check('package.json 声明客户端半边', pkg.dsh && pkg.dsh.client && pkg.dsh.client.platform === 'web')
 check('拓展包的 patch 里声明了本包', fs.readFileSync(path.join(dir, '..', 'style-extras', 'cordis.patch.yml'), 'utf8').includes(`name: ${pkg.name}`))
 
+// 编辑重发必须**保留图片/文件等内容块**（2026-10-28 真机反馈：改完文字，原消息里的图片全没了）
+{
+  const rm = /function rebuildEditedContent\([\s\S]*?\n\}/.exec(host)
+  check('找到纯函数 rebuildEditedContent（编辑保留附件可测）', rm !== null)
+  if (rm !== null) {
+    // eslint-disable-next-line no-new-func
+    const rebuild = new Function(`return (${rm[0]})`)()
+    const j = (v) => JSON.stringify(v)
+    const img = { type: 'image', image: { id: 'img-1' } }
+    const file = { type: 'file', file: { name: 'a.txt' } }
+    check('编辑保留图片块', j(rebuild([{ type: 'text', text: '旧' }, img], '新')) === j([{ type: 'text', text: '新' }, img]))
+    check('编辑保留图片/文件且顺序不变', j(rebuild([img, { type: 'text', text: '旧' }, file], '新')) === j([img, { type: 'text', text: '新' }, file]))
+    check('原消息没有文字块时把新文字追加在末尾', j(rebuild([img], '新')) === j([img, { type: 'text', text: '新' }]))
+    check('多个文字块合并成一块', j(rebuild([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }], '新')) === j([{ type: 'text', text: '新' }]))
+    check('空/非数组内容不炸', j(rebuild(undefined, '新')) === j([{ type: 'text', text: '新' }]))
+  }
+}
+
+// 浮层层级：官方代码块的吸顶条是 z-index:7（.xpvNua_slot 等），我们的弹窗早先只有 1 会被盖住
+// （2026-10-28 真机截图）。要求弹窗/编辑框都抬到 8 以上、但仍低于官方菜单/面板（1100）。
+check('撤回弹窗层级高于官方吸顶条（z-index ≥ 8）', /\.me-confirm\{[^}]*z-index:\s*(?:[89]|[1-9]\d+)/.test(client))
+check('编辑框也抬了层级（避免被同消息里的代码块吸顶条盖住）', /\.me-editor\{[^}]*z-index:\s*(?:[89]|[1-9]\d+)/.test(client))
+check('弹窗层级仍低于官方菜单/面板（1100）', !/\.me-confirm\{[^}]*z-index:\s*(?:1[1-9]\d{2}|[2-9]\d{3,})/.test(client))
+
 process.stdout.write(notes.join('\n') + '\n')
 if (failures.length > 0) {
   console.error('\nFAILURES:\n' + failures.map((line) => '  ✗ ' + line).join('\n'))
