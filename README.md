@@ -4,7 +4,7 @@
 [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-7c3aed.svg)](https://github.com/topics/dsh-plugin)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--rc.2-4f46e5.svg)](https://github.com/topics/dsh-plugin)
 
-九个跑在 [DeepSeek Harness](https://github.com/topics/dsh-plugin)（DSH）桌面端里的**社区插件包**：
+十个跑在 [DeepSeek Harness](https://github.com/topics/dsh-plugin)（DSH）桌面端里的**社区插件包**：
 长期记忆、桌面宠物、GUI 皮肤、Token 用量报表、系统状态、旁支提问、消息撤回/编辑，以及给官方
 Agent Teams 补上「让 teammates 散伙」的 fork。
 
@@ -30,6 +30,7 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 | [**临时提问**](btw/) | `dsh-btw` 0.1.0 | 普通包 | 右侧栏「开始」页的 `/btw` 卡片：答案不进历史、没有工具、退出即消失 |
 | [**消息撤回 / 编辑**](message-edit/) | `dsh-message-edit` 0.1.0 | 普通包 | 已发送的用户消息可以**撤回**和**编辑**：原生操作行加两个图标钮，编辑态在原气泡位置无缝覆盖 |
 | [**Agent Teams Plus**](agent-team-plus/) | `@local/dsh-agent-team-plus` 0.2.0-rc.2.1 | 组合包 | 官方 Agent Teams 的 fork：成员上限 8 → 16，新增 `release_teammate`（成员散伙腾坑、可再雇新） |
+| [**跨实例任务投递桥**](dsh-xiaoxing-bridge/) | `dsh-xiaoxing-bridge` 0.1.0 | 组合包 | 每 3 秒扫共享 `inbox/`，把**已批准**的任务投进指定会话，再把进度与最终答复写回 `outbox/`。⚠️ **双向桥的一半**：对侧在 study-kit，两边 `bridgeDir` 必须一致，**单装无效** |
 
 > 「组合包」= 自带 `dsh.bundle.patch`，在侧栏「插件」页里有独立卡片；「普通包」= 只有加载行，
 > 由 profile 的 patch 或某个组合包声明（本仓库里 `skins` / `sysmon` / `token-stats` / `pet` /
@@ -323,6 +324,7 @@ dsh-plugins/
 ├── style-extras/        dsh-style-extras   组合包：把 skins/sysmon/token-stats/btw/message-edit 收成一张卡片
 ├── message-edit/        dsh-message-edit   组合包：撤回 / 编辑已发送的用户消息
 ├── agent-team-plus/     官方 Agent Teams 的 fork（上限 16 + release_teammate）
+├── dsh-xiaoxing-bridge/ 跨实例任务投递桥（对侧在 study-kit，单装无效）
 ├── tools/               不属于任何插件包的本机维护脚本
 ├── docs/                README 用的截图
 ├── LICENSE / THIRD-PARTY-NOTICES.md
@@ -364,7 +366,7 @@ dsh-plugins/
 ## English
 
 **dsh-plugins** is a collection of community plugins for **DeepSeek Harness (DSH)**, a
-desktop AI-agent workbench. Nine self-contained packages, each with its own README,
+desktop AI-agent workbench. Ten packages, each with its own README,
 self-check scripts and hard-won gotchas:
 
 `dsh-memory` (cross-session Markdown long-term memory + four tools) ·
@@ -376,7 +378,10 @@ self-check scripts and hard-won gotchas:
 `dsh-btw` (side-question card; answers never enter the transcript, no tools) ·
 `dsh-message-edit` (retract / edit already-sent user messages; in-place native editor) ·
 `dsh-agent-team-plus` (fork of the official Agent Teams with a member cap of 16 and a
-`release_teammate` tool).
+`release_teammate` tool) ·
+`dsh-xiaoxing-bridge` (one half of a cross-instance task bridge over a shared
+`inbox/` + `outbox/` directory; the counterpart lives in my study-kit repo, so it is
+useless on its own).
 
 Install any package with `plugin_manager → install_bundle` pointing at its absolute
 directory, then **restart the desktop app** for client-side plugins. Validated on DSH 0.2.1-rc.1 /
