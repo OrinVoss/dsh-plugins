@@ -151,7 +151,7 @@ window.__ModuleLoader__.load({
  * 编辑态：**白底 + 蓝色描线**（与气泡的蓝色填充区分开，读作"可编辑的输入框"），
  * 几何由内联样式给出（实测原气泡的 top/left/宽/最小高），所以整块不位移不跳尺寸。
  */
-.me-editor{box-sizing:border-box;max-width:100%;
+.me-editor{box-sizing:border-box;max-width:100%;z-index:30;
   background:var(--dsw-alias-bg-base,#fff);
   border:1px solid var(--dsw-alias-state-business-primary,#4d6bfe);
   border-radius:var(--dsw-radius-xl);
@@ -201,10 +201,14 @@ window.__ModuleLoader__.load({
 /*
  * 注意：**不要**给 .me-root 抬 z-index。曾经这么干过（想压过输入框），结果整条消息
  * 行（含蓝色气泡本体）都被抬到输入框上面，看起来像气泡浮在输入框里。
- * 现在方向由翻转保证（气泡永远不会和输入框重叠），层级只需要气泡自己那层 z-index:1，
- * 它足以盖住后面那些 DOM 靠后但没有定位层级的行。
+ * 现在方向由翻转保证（气泡永远不会和输入框重叠）。
+ *
+ * 但**弹窗自己**必须抬得足够高：官方代码块的吸顶条是 z-index:7（.xpvNua_slot 等），
+ * 早先这里只有 z-index:1，旁边一有代码块，它的头部就盖住这个气泡的右半边
+ * （2026-10-28 真机截图）。取 40：高于所有官方**流内**浮层（吸顶条 ≤7 等），
+ * 又低于官方菜单/面板的 1100，所以官方弹层仍然压在它上面。
  */
-.me-confirm{position:absolute;right:0;top:calc(100% + 6px);z-index:1;
+.me-confirm{position:absolute;right:0;top:calc(100% + 6px);z-index:40;
   box-sizing:border-box;display:flex;flex-direction:column;gap:10px;
   width:max-content;max-width:min(300px,80vw);padding:12px;
   border-radius:var(--dsw-radius-lg,12px);

@@ -1,0 +1,47 @@
+# dsh-xiaoxing-bridge 的加载行。
+#
+# ⚠️ 这个包是**编程助手那一侧的宿主逻辑**：每 3 秒扫共享 inbox，
+#    发现"已批准"的新任务就用 sessionController 投进目标会话，
+#    再把会话进度/最终答复写进 outbox。
+#
+# ⚠️ 它**不会**自己重启任何实例。装好后要用户手动重启 desktop 实例才生效
+#    （宿主半边不随客户端热更；重启会把用户从当前会话踢下去，所以要他自己决定时机）。
+#
+# ⚠️ peerDependencies 里别钉死 DSH 版本，版本范围看 package.json 的 `engines.dsh`。
+#
+# ⚠️ 一次只跑一条：同一会话并发两条任务，正文会缠在一起，"最终答复"也分不清是谁的。
+#    排在后面的保持 queued，等前一条 turn/end。
+- insert:
+    - id: xiaoxing-bridge
+      name: 'dsh-xiaoxing-bridge'
+      config:
+        # 两个实例共用的总线目录（**必须和小星侧插件配成同一个**）
+        bridgeDir: 'D:\桌面\自主工作空间\_bridge'
+
+        # 投给哪个会话。这个 id 是用户正在用的编程助手会话（工作区 D:\桌面\自主工作空间），
+        # 不是"新建一个会话" —— 任务会出现在他的历史里，他能看到、也能插话。
+        sessionId: 'session-331d9500-d50b-489c-8fec-e367cd210377'
+
+        # 扫 inbox 的间隔（规格：3 秒）
+        pollIntervalMs: 3000
+
+        # outbox 写盘节流（规格：最多每 3 秒一次）。
+        # 工具调用一串串来，不节流就是把磁盘当日志写，还会让对面每 3 秒看到"变化"。
+        # 状态跃迁（queued→running→done/failed）不受这个限制。
+        throttleMs: 3000
+
+        # 没有 approvals/<taskId>.json 的 approved 记录就不投。
+        # **别关** —— 关了等于"小星想发什么就发什么"，审批这一步就名存实亡。
+        requireApproval: true
+
+        # 回传正文上限（字符）。超了截断，小星那边会看到"原文多少字"。
+        maxResultChars: 8000
+
+        # 一条任务卡多久算超时，标 failed 让队列继续走（0 = 不判）
+        staleActiveMs: 1800000
+
+        # 日志 / 心跳 / 停开关
+        logFile: 'C:\Users\17040\.dsh\logs\handoff-bridge.log'
+        heartbeatFile: 'C:\Users\17040\.dsh\logs\handoff-bridge.heartbeat'
+        heartbeatIntervalMs: 30000
+        killSwitchFile: 'C:\Users\17040\.dsh\logs\handoff-bridge.off'

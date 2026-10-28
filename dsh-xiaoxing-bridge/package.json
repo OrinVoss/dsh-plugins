@@ -1,0 +1,36 @@
+{
+  "name": "dsh-xiaoxing-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "跨实例任务投递桥（编程助手侧）：扫共享 inbox，把任务投进指定会话，进度与最终答复写回 outbox。",
+  "type": "module",
+  "main": "host.js",
+  "exports": {
+    ".": "./host.js",
+    "./core": "./bridge-core.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.2 <0.3.0",
+    "node": ">=22.5.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-api-session-controller": "*",
+    "@deepseek-ai/dsh-session-persistence": "*",
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "files": [
+    "host.js",
+    "bridge-core.js",
+    "cordis.patch.yml",
+    "README.md",
+    "test-bridge.mjs",
+    "test-e2e.mjs"
+  ]
+}
