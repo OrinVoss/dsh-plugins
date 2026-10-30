@@ -2,7 +2,7 @@
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-7c3aed.svg)](https://github.com/topics/dsh-plugin)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--rc.2-4f46e5.svg)](https://github.com/topics/dsh-plugin)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--rc.5-4f46e5.svg)](https://github.com/topics/dsh-plugin)
 
 十个跑在 [DeepSeek Harness](https://github.com/topics/dsh-plugin)（DSH）桌面端里的**社区插件包**：
 长期记忆、桌面宠物、GUI 皮肤、Token 用量报表、系统状态、旁支提问、消息撤回/编辑，以及给官方
@@ -43,8 +43,9 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 ### 前置
 
 - **DSH 桌面端 ≥ 0.2.0**（0.2.0 起旧 `.agent-presets/` 机制废除，插件走 bundle 声明）；
-  各包按 **0.2.1-rc.1 / rc.2** 的宿主契约开发与验证（本机跑的是 0.2.1-rc.2）。
-  `agent-team-plus` 的 peer 走「**已核验版本白名单**」（`0.2.1-rc.1 || 0.2.1-rc.2`）：未核验的
+  各包按 **0.2.1-rc.1 / rc.2 / rc.3 / rc.5** 的宿主契约开发与验证（本机 2026-10-30 起跑 0.2.1-rc.5）。
+rc.3 → rc.5 的差异实测：18,234 个文件里只有 **17 个**真实内容变化（其余只是版本号/commit/CSS 哈希），cordis Service/slot 目录 `api-catalog.js` **SHA256 完全一致**，本仓库各包依赖的官方包 `lib/` 逐字节相同；`chat` / `conversation` 两个 client bundle 的改动只有「推理文本剥离 `<signature>`」与「会话视图 tab 悬浮提示」。
+  `agent-team-plus` 的 peer 走「**已核验版本白名单**」（`0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5`）：未核验的
   DSH 版本会被明确拦下，而不是整个组合包被**静默跳过**。
 - 插件跑在 DSH 自带运行时里，**不需要**系统 Node / pnpm。
 - 本仓库**不打包**任何 `@deepseek-ai/*` 依赖，由你本机的 DSH 安装提供。
@@ -385,7 +386,8 @@ useless on its own).
 
 Install any package with `plugin_manager → install_bundle` pointing at its absolute
 directory, then **restart the desktop app** for client-side plugins. Validated on DSH 0.2.1-rc.1 /
-rc.2 (`agent-team-plus` pins a *verified-version allowlist* instead of a single exact version).
+rc.2 / rc.3 / rc.5 (`agent-team-plus` pins a *verified-version allowlist* instead of a single exact version;
+rc.3 → rc.5 changed only 17 files and kept the cordis API catalog byte-identical).
 Licensed MIT; `agent-team-plus` retains DeepSeek's upstream MIT notice.
 
 ---
