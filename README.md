@@ -21,7 +21,7 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 
 | 插件 | 包名 / 版本 | 形态 | 一句话 |
 | --- | --- | --- | --- |
-| [**记忆**](memory/) | `dsh-memory` 0.3.1 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；全局索引注入 `AGENTS.md` 托管区块、**工作区索引注入工作区自己的 `AGENTS.local.md`**，设置页可浏览编辑 |
+| [**记忆**](memory/) | `dsh-memory` 0.3.2 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；全局索引注入 `AGENTS.md` 托管区块、**工作区索引注入工作区自己的 `AGENTS.local.md`**，设置页可浏览编辑 |
 | [**桌面宠物**](pet/) | `dsh-pet` 0.1.0 | 普通包 | 浮层里的一只小家伙：5 种宠物、7 种状态，随皮肤换色、随 Agent 干活换表情 |
 | [**皮肤**](skins/) | `dsh-skins` 1.0.0 | 普通包 | 叠加在浅/深主题上的 7 套配色层（青花瓷 / 东京夜 / 水墨 / 青绿山水 / 卡布奇诺 / 中国风 / 莫兰迪），字体一起换 |
 | [**系统状态**](sysmon/) | `dsh-sysmon` 1.0.0 | 普通包 | 侧栏底部一排圆环：CPU / 内存 / 磁盘 IO / 双显卡（窄侧栏收敛成单个 CPU 环） |
@@ -133,6 +133,11 @@ cd <包目录>; npm test          # 有 test 脚本的包
 跨会话的 Markdown 长期记忆库：`~/.dsh/memory` 下是 `INDEX.md` + 分主题目录，模型拿到
 `memory_write` / `memory_search` / `memory_read` / `memory_forget` 四个工具。设置 → 记忆 里可浏览 /
 编辑 / 删除，带健康度卡片；落盘即 `git commit`（只本地、从不 push）。
+
+**写前查重（2026-10-31）**：`memory_write` 的工具描述明确要求「先 `memory_search`/`memory_read` 查重，
+有同一件事的条目就用同一个 `name` + `overwrite: true` 更新它，别为同一事实新建近似条目」；注入块里也写了
+同一条约定；并且**新建时撞上相近条目会被硬拦下**（同标题或 slug 词块 Jaccard ≥ 0.6，返回 `reason: "similar"`
+并列出候选），确认是新事实才带 `allowSimilar: true`。
 
 **注入分两个层级**，都走 DSH 自己的指令文件机制（`dsh-agent-instructions` 会加载它们）：
 
