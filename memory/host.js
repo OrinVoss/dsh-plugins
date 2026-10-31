@@ -158,8 +158,11 @@ function applyInner(ctx, config) {
   ctx.effect(() => defineRegister(ctx, defineTool({
     name: 'memory_write',
     description:
-      '把一条长期记忆写进记忆库（自动生成 frontmatter、写正文、并把摘要挂到索引里）。' +
-      '写之前先 memory_search 查重。scope=global 用于「换任何工作区都成立」的事实（机器环境、网络代理、工具链路径、用户偏好、踩过的坑）；' +
+      '**写之前先查重**：先用 `memory_search`（不带 query 直接列出索引，最快扫同主题）或 `memory_read` 看有没有已经写过同一件事的条目。' +
+      '**有就更新它**——用同一个 name 带 `overwrite: true` 重写，不要为同一事实换 slug 新建近似条目；' +
+      '重复条目会撑大索引与注入块、让检索命中被分散。确认是新事实才新建；新建时若撞上相近条目的标题/摘要会被拦下' +
+      '（确实不同才带 `allowSimilar: true`）。' +
+      'scope=global 用于「换任何工作区都成立」的事实（机器环境、网络代理、工具链路径、用户偏好、踩过的坑）；' +
       'scope=project 用于只对当前工作区成立的决策与坑。name 是稳定的英文/拼音小写 slug，可用 "/" 分子目录（如 preferences/git-local-commit-only）。',
     parameters: {
       type: 'object',
@@ -195,7 +198,13 @@ function applyInner(ctx, config) {
           type: 'string',
           description: '正文 Markdown。建议写成「事实 → **Why:** 为什么 → **How to apply:** 怎么用」，并可用 [[other-memory-name]] 互链'
         },
-        overwrite: { type: 'boolean', description: '条目已存在时是否整条替换（默认 false，会拒绝并提示）' }
+        overwrite: { type: 'boolean', description: '条目已存在时是否整条替换（默认 false，会拒绝并提示）' },
+        allowSimilar: {
+          type: 'boolean',
+          description:
+            '仅当确认这是**新事实**、与已有相近条目不是同一件事时传 true，才能强行新建' +
+            '（默认 false：新建时撞上同标题/同摘要/近名条目会被拦下，提示你改用 overwrite 更新原条目）'
+        }
       }
     },
     execute(args, exec) {
@@ -210,6 +219,7 @@ function applyInner(ctx, config) {
           section: args.section,
           body: args.body,
           overwrite: args.overwrite === true,
+          allowSimilar: args.allowSimilar === true,
           sessionId: sessionIdOf(exec)
         }, cwd)
         if (!res.ok) return { text: `memory_write 未写入：${res.message}` }
@@ -233,7 +243,9 @@ function applyInner(ctx, config) {
     name: 'memory_search',
     description:
       '按关键词检索长期记忆，直接返回命中的条目正文。任务涉及本机环境、网络代理、工具链、用户偏好、交付物制作技巧，或要新建管线/踩到似曾相识的坑时，先用它。' +
-      'query 省略则返回索引（只有标题+摘要）。scope 默认 auto（项目 + 全局）。',
+      'query 省略则返回索引（只有标题+摘要）。' +
+      '**写记忆前也先跑它查重**：不带 query 列一遍索引，看到同主题条目就直接用 memory_read 读出来、' +
+      '再用 memory_write 带 overwrite 更新，而不是新建一条。scope 默认 auto（项目 + 全局）。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -298,7 +310,9 @@ function applyInner(ctx, config) {
 
   ctx.effect(() => defineRegister(ctx, defineTool({
     name: 'memory_read',
-    description: '按名字精确读取一条记忆的完整正文（名字就是索引里那条的路径，去掉 .md）。scope 默认 auto：先找当前工作区，再找全局。',
+    description:
+      '按名字精确读取一条记忆的完整正文（名字就是索引里那条的路径，去掉 .md）。scope 默认 auto：先找当前工作区，再找全局。' +
+      '**更新一条已有记忆前先用它读出原文**，把新信息并进正文再带 overwrite: true 写回去。',
     parameters: {
       type: 'object',
       additionalProperties: false,

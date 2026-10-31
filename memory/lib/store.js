@@ -451,6 +451,62 @@ function indexEntries(text) {
   return out
 }
 
+// ---------------------------------------------------------------- 写前查重
+
+/** 相似度比较用的归一化：小写、去掉空白与中英文标点。 */
+function normalizeSimilar(value) {
+  return String(value == null ? '' : value)
+    .toLowerCase()
+    .replace(/[\s\u3000\-_·:：，,。.、；;！!？?（）()【】\[\]《》<>"'“”‘’/\\]/g, '')
+}
+
+/** 从 slug / 索引里的 target 取词块（按非字母数字切）。 */
+function nameTokensFrom(value) {
+  return new Set(String(value == null ? '' : value)
+    .replace(/\.md$/i, '')
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fff]+/)
+    .filter(Boolean))
+}
+
+/**
+ * 找出「可能记的是同一件事」的既有条目（**只在新建之前**用）。
+ *
+ * 判据刻意保守，避免误拦正常的新条目：
+ *   - 同作用域；给了 section 时必须同分组；
+ *   - 标题（归一化后）相同，或 name 词块 Jaccard ≥ 0.6（双方都 ≥3 个词时才算）。
+ * 刻意**不用「摘要相同」**：批量写同一模板描述（测试夹具、系列条目）时会把正常条目全拦掉
+ * （2026-10-31 自检里 buildProjectBlock 用例就是这么被误拦的）。
+ *
+ * 命中就拒绝，让调用方改用 `overwrite: true` 更新原条目——同一事实散成多条会撑大索引与
+ * 注入块、检索命中也会被分散（2026-10-31 用户需求：写记忆优先找已存在的条目）。
+ *
+ * @param sp - 已解析的作用域路径（`scopePaths()` 的结果；本函数是模块级，拿不到闭包）。
+ * @returns 最多 3 条 `{ target, title, summary, score }`，score 越大越像。
+ */
+function similarEntries(sp, input) {
+  const text = readText(sp.indexFile)
+  if (text === null) return []
+  const wantSection = input.section ? String(input.section).trim() : ''
+  const wantTitle = normalizeSimilar(input.title ? input.title : String(input.name || '').split('/').pop())
+  const wantTokens = nameTokensFrom(input.name)
+  const out = []
+  for (const entry of indexEntries(text)) {
+    if (wantSection !== '' && entry.section !== wantSection) continue
+    const tokens = nameTokensFrom(entry.target)
+    let score = 0
+    if (wantTitle !== '' && normalizeSimilar(entry.title) === wantTitle) score = 3
+    else if (wantTokens.size >= 3 && tokens.size >= 3) {
+      let common = 0
+      for (const token of wantTokens) if (tokens.has(token)) common += 1
+      const union = wantTokens.size + tokens.size - common
+      if (common / union >= 0.6) score = 2
+    }
+    if (score > 0) out.push({ target: entry.target, title: entry.title, summary: entry.summary, score })
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 3)
+}
+
 // ---------------------------------------------------------------- 检索切词
 
 /** 词与词的分隔符：空白、全角空格与中英文标点。注意**不含** `.`，否则 `13.4`、`store.js` 会被切碎。 */
@@ -692,6 +748,24 @@ function createStore(options) {
     const body = String(input.body == null ? '' : input.body).trim()
     if (!body) return { ok: false, reason: 'empty-body', message: 'memory_write: body 不能为空' }
     if (!meta.description) return { ok: false, reason: 'no-description', message: 'memory_write: description 不能为空（它是索引里那一行摘要）' }
+
+    // 新建前先查「是不是已经有说的是同一件事的条目」：命中就拒绝，要求改用 overwrite 更新它。
+    // 2026-10-31 需求：写记忆优先找已存在的条目，没必要为同一事实再开一条。
+    if (existingText === null && input.allowSimilar !== true) {
+      const similar = similarEntries(sp, input)
+      if (similar.length > 0) {
+        const list = similar.map((s) => `\`${String(s.target).replace(/\.md$/, '')}\`（${s.title}）`).join('、')
+        return {
+          ok: false,
+          reason: 'similar',
+          scope: sp.scope,
+          name: slug,
+          target,
+          similar,
+          message: `已存在相近条目：${list}。若是同一件事，请用 \`memory_read\` 读出原文，再用 \`memory_write\` 带 \`overwrite: true\` 更新它（保留原 name）；确认确实是新事实才带 \`allowSimilar: true\` 重写。`
+        }
+      }
+    }
 
     writeTextAtomic(file, serializeEntry(meta, body))
 
@@ -939,7 +1013,9 @@ function createStore(options) {
     lines.push('  也可以直接 `read` 索引里给出的相对路径。**不要整库通读。**')
     lines.push('- 新学到「换项目也成立」的事实 → `memory_write` 且 `scope: "global"`；')
     lines.push('  只对当前工作区成立的 → `scope: "project"`（按会话 cwd 自动归档，不必手填路径）。')
-    lines.push('  写入前先 `memory_search` 查重。')
+    lines.push('  写入前先 `memory_search` 查重（不带 query 只列索引，最适合先扫有没有同主题条目）；')
+    lines.push('  **已有说的是同一件事的条目就更新它**（`memory_write` 带 `overwrite: true`、保留原 name），')
+    lines.push('  不要为同一事实新建近似条目——重复条目会撑大索引与注入块、还会分散检索命中。')
     lines.push('')
     lines.push('### 全局记忆索引')
     lines.push('')

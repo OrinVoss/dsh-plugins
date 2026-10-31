@@ -57,12 +57,40 @@ metadata:
 
 | 工具 | 作用 |
 |---|---|
-| `memory_write` | 写一条记忆：`scope`（global/project）、`name`（slug，可含 `/`）、`description`（索引那行摘要）、`body`、可选 `title`/`type`/`section`/`overwrite`。条目已存在时**默认拒绝**，必须显式 `overwrite: true` 才整条替换。**覆盖时不传 `section` 会沿用索引里现有的分组**（只有全新条目才回退到 name 首段目录）；传了则把条目搬到该分组。 |
+| `memory_write` | 写一条记忆：`scope`（global/project）、`name`（slug，可含 `/`）、`description`（索引那行摘要）、`body`、可选 `title`/`type`/`section`/`overwrite`/`allowSimilar`。**写之前先查重、有就更新**（见 3.1）：条目已存在时**默认拒绝**，必须显式 `overwrite: true` 才整条替换；新建时撞上**相近条目**也会被拦下（要强行新建带 `allowSimilar: true`）。**覆盖时不传 `section` 会沿用索引里现有的分组**（只有全新条目才回退到 name 首段目录）；传了则把条目搬到该分组。 |
 | `memory_search` | 关键词检索，**直接返回命中条目正文**；`query` 省略则返回索引。默认 `scope: auto` = 先当前工作区、再全局。 |
 | `memory_read` | 按名字精确读全文（名字就是索引里的路径，`.md` 可省）。 |
 | `memory_forget` | 删除条目并同步摘掉索引。 |
 
 写入成功后插件会立刻重写 `AGENTS.md` 的托管区块，所以**下一个会话**（以及刷新后的当前会话）就能看到新索引。
+
+### 3.1 写前查重：有同一件事的条目就更新，别再新建（2026-10-31）
+
+模型写记忆最常见的坏习惯是**为同一事实换一个 slug 再开一条**——索引和注入块会膨胀，
+而且同一件事散成好几条之后检索命中也会被分散。现在这条约束同时落在三处：
+
+1. **工具描述**（模型看得到）：`memory_write` 的第一句就是「**写之前先查重**」——先 `memory_search`
+   （不带 `query` 直接列索引最快）或 `memory_read`，**有就更新它**（同 `name` + `overwrite: true`）；
+   `memory_search` 也写明它是写入前的查重步骤。
+2. **注入块**（`AGENTS.md` 托管区块）：`写入前先 memory_search 查重……已有说的是同一件事的条目就更新它，
+   不要为同一事实新建近似条目`。
+3. **硬拦截**（不是提示，是真拒绝）：新建条目时若撞上相近条目，返回 `reason: "similar"` 并列出候选：
+
+   ```
+   memory_write 未写入：已存在相近条目：`tools/kimi-resources`（Kimi 资源）。
+   若是同一件事，请用 memory_read 读出原文，再用 memory_write 带 overwrite: true 更新它（保留原 name）；
+   确认确实是新事实才带 allowSimilar: true 重写。
+   ```
+
+判据刻意保守（同作用域；给了 `section` 时还要求同分组）：
+- 标题**归一化后相同**（去大小写/空白/中英文标点）；
+- 或 `name` 的**词块 Jaccard ≥ 0.6**（双方都至少 3 个词才判，例如
+  `tools/kimi-resources` ↔ `tools/kimi-resources-v2` 命中，`tools/a-b-c` ↔ `tools/x-y-z` 不命中）。
+
+**刻意不用「摘要相同」**：批量写同一模板描述（测试夹具、系列条目）会把正常条目全拦掉——
+自检里的 `buildProjectBlock` 用例就是被这条误拦过（8 条不同条目共用一句描述）。
+
+更新已有条目（`overwrite: true`）不受查重闸影响；`memory_read` + 改正文仍是最推荐的「更新」姿势。
 
 ## 4. 设置页（记忆管理界面）
 
