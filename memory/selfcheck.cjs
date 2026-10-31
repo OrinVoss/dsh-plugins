@@ -298,11 +298,6 @@ check('overwrite: true 更新正文且保留 createdAt', () => {
   assert.equal(idx.split('kimi-resources.md').length - 1, 1, '索引里不应出现两条同目标条目')
 })
 
-check('空 body / 空 description 被拒绝', () => {
-  assert.equal(store.write('global', { name: 'x/y', description: 'd', body: '   ' }, cwd).reason, 'empty-body')
-  assert.equal(store.write('global', { name: 'x/z', description: '', body: 'b' }, cwd).reason, 'no-description')
-})
-
 // ------------------------------------------------- 索引重复登记回归（2026-10-01）
 
 check('索引去重：overwrite 漏传 section → 沿用原分组，不追加重复登记', () => {
@@ -834,6 +829,108 @@ check('injectProjectBlock:false 时完全不写工作区', () => {
   off.write('project', { name: 'off/y', title: 'Y', description: 'd', body: 'b' }, c)
   assert.equal(off.syncWorkspaceAgents(c).reason, 'disabled')
   assert.ok(!fs.existsSync(path.join(c, 'AGENTS.local.md')))
+})
+
+// ------------------------------------- 写前查重：撞上相近条目要拦（2026-10-31 需求）
+
+// 独立夹具：本组用例会额外写条目，不能污染前面那些对计数/空目录/预算敏感的断言。
+const dedupHome = path.join(root, 'dedup-memory')
+const dedupCwd = path.join(root, 'ws-dedup')
+fs.mkdirSync(dedupCwd, { recursive: true })
+const dedupStore = storeLib.createStore({ home: dedupHome, agentsPath: path.join(root, 'dedup-AGENTS.md'), maxBlockBytes: 20000 })
+
+check('（夹具）先建一条 tools/kimi-resources', () => {
+  const res = dedupStore.write('global', {
+    name: 'tools/kimi-resources',
+    title: 'Kimi 资源',
+    description: 'Kimi 相关的资源与用法',
+    section: '工具配置',
+    body: '正文'
+  }, dedupCwd)
+  assert.equal(res.ok, true)
+})
+
+check('新建时撞上同标题 → 拒绝，并指向原条目', () => {
+  const res = dedupStore.write('global', {
+    name: 'tools/some-other-name', // 不同 name，但标题归一化后相同
+    title: 'Kimi 资源',
+    description: '另一个摘要',
+    section: '工具配置',
+    body: '正文'
+  }, dedupCwd)
+  assert.equal(res.ok, false)
+  assert.equal(res.reason, 'similar')
+  assert.match(res.message, /overwrite: true/)
+  assert.match(res.message, /kimi-resources/)
+  assert.match(res.message, /allowSimilar: true/)
+  assert.ok(Array.isArray(res.similar) && res.similar.length >= 1)
+  assert.equal(fs.existsSync(path.join(dedupHome, 'tools', 'some-other-name.md')), false, '被拦的写入不应落盘')
+})
+
+check('name 词块高度重合也算相近（标题不同也能识别）', () => {
+  const res = dedupStore.write('global', {
+    name: 'tools/kimi-resources-v2',
+    title: '完全不同的标题',
+    description: '完全不同的摘要',
+    section: '工具配置',
+    body: '正文'
+  }, dedupCwd)
+  assert.equal(res.ok, false)
+  assert.equal(res.reason, 'similar')
+})
+
+check('不同分组 / 不同主题的新条目不被误拦', () => {
+  assert.equal(dedupStore.write('global', {
+    name: 'tools/brand-new-topic',
+    title: '完全无关的新主题',
+    description: '和上面的条目没有任何关系',
+    section: '工具配置',
+    body: '正文'
+  }, dedupCwd).ok, true)
+  assert.equal(dedupStore.write('global', {
+    name: 'hardware/kimi-resources', // 同名不同分组 ⇒ 不拦
+    title: 'Kimi 资源（硬件侧）',
+    description: '硬件侧的说明',
+    body: '正文'
+  }, dedupCwd).ok, true)
+})
+
+check('allowSimilar: true 才允许强行新建同名标题', () => {
+  const res = dedupStore.write('global', {
+    name: 'tools/kimi-resources-copy',
+    title: 'Kimi 资源',
+    description: '另一个摘要',
+    section: '工具配置',
+    body: '正文',
+    allowSimilar: true
+  }, dedupCwd)
+  assert.equal(res.ok, true)
+  assert.equal(res.updated, false)
+})
+
+check('查重闸在参数校验之后：空 body 仍报 empty-body', () => {
+  const res = dedupStore.write('global', { name: 'tools/kimi-resources-x', title: 'Kimi 资源', description: 'd', body: '  ' }, dedupCwd)
+  assert.equal(res.reason, 'empty-body')
+})
+
+check('更新已有条目不受影响（同 name + overwrite）', () => {
+  const res = dedupStore.write('global', {
+    name: 'tools/kimi-resources',
+    title: 'Kimi 资源',
+    description: '更新后的摘要',
+    section: '工具配置',
+    body: '更新后的正文',
+    overwrite: true
+  }, dedupCwd)
+  assert.equal(res.ok, true)
+  assert.equal(res.updated, true)
+})
+
+check('注入块写明「有同一件事的条目就更新它」', () => {
+  const block = dedupStore.buildBlock(dedupCwd)
+  assert.match(block, /写入前先 `memory_search` 查重/)
+  assert.match(block, /已有说的是同一件事的条目就更新它/)
+  assert.match(block, /不要为同一事实新建近似条目/)
 })
 
 // ---------------------------------------------------------------- 结果

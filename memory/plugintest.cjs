@@ -669,7 +669,7 @@ async function main() {
     const repo2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-memory-nm-'))
     const s3 = storeLib.createStore({ home: repo2, agentsPath: path.join(repo2, 'AGENTS.md'), maxBlockBytes: 32768, autoCommit: false })
     s3.write('global', { name: 'tools/leaf-probe', description: '路径式探针', body: 'x' })
-    s3.write('global', { name: 'leaf-probe', description: '叶子名探针', body: 'y' })
+    s3.write('global', { name: 'leaf-probe', description: '叶子名探针', body: 'y', allowSimilar: true })
     const rows = nm.collect(repo2)
     const a = rows.find((r) => r.target === 'tools/leaf-probe.md')
     const b = rows.find((r) => r.target === 'leaf-probe.md')
