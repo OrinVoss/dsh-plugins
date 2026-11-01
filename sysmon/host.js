@@ -4,6 +4,42 @@
 // Spawning goes through the dsh `subprocess` service (sandbox-compatible),
 // NOT node:child_process.execFile (which EPERMs inside the dsh process).
 
+const os = require('node:os')
+
+/**
+ * 纯函数：由两次 `os.cpus()` 累计时间算 CPU 使用率（%）。
+ *
+ * 为什么要自己算：宿主原来的采样整包跑 PowerShell（脚本里三次 Start-Sleep 就 ~700ms），
+ * 只能 1s 一次；而 CPU/内存用 Node 的 `os` 模块是**零成本**的，可以 500ms 甚至更快。
+ * 注意 `os.cpus()[i].times` 是**开机以来的累计值**，必须两次快照相减才有意义。
+ *
+ * @param prev - 上一次的 `{ idle, total }`（首次传入 null）。
+ * @param curr - 这一次的 `{ idle, total }`。
+ * @returns 0–100 的百分比（保留一位小数）；没有可比基线时返回 null。
+ */
+function cpuDeltaPct(prev, curr) {
+  if (!prev || !curr) return null
+  const dTotal = curr.total - prev.total
+  const dIdle = curr.idle - prev.idle
+  if (!(dTotal > 0)) return null
+  const busy = 100 * (1 - dIdle / dTotal)
+  return Math.round(Math.max(0, Math.min(100, busy)) * 10) / 10
+}
+
+/** 当前 CPU 累计快照（所有核的 times 求和）。 */
+function cpuSnapshot() {
+  let idle = 0
+  let total = 0
+  for (const cpu of os.cpus() || []) {
+    for (const key of Object.keys(cpu.times || {})) total += cpu.times[key]
+    idle += (cpu.times && cpu.times.idle) || 0
+  }
+  return { idle, total }
+}
+
+/** 慢采样（磁盘 / GPU）的刷新周期：PowerShell 起来一次要 ~1s，2s 一次足够且不烧 CPU。 */
+const SLOW_TTL_MS = 2000
+
 const SCRIPT = [
   "$ErrorActionPreference = 'SilentlyContinue'",
   "# CPU: warm up once, then read",
@@ -106,9 +142,12 @@ module.exports = {
   apply(ctx) {
     let sidebarWidth = 280
     let sidebarWide = true
-    let cache = null
-    let lastAt = 0
-    let inflight = null
+    // 慢采样（磁盘 / GPU，走 PowerShell）：只留最近一次结果，后台刷新，**不阻塞**接口
+    let slow = { disks: [], gpus: [] }
+    let slowAt = 0
+    let slowInflight = null
+    // 快采样（CPU / 内存，走 node:os）：每次请求即时算
+    let cpuPrev = null
 
     async function runSample() {
       let exe
@@ -153,28 +192,51 @@ module.exports = {
       }
     }
 
-    const sample = async () => {
-      const now = Date.now()
-      if (cache && now - lastAt < 1000) return cache
-      if (inflight) return inflight
-      inflight = runSample().then((result) => {
-        cache = result
-        lastAt = Date.now()
-        inflight = null
-        return result
-      }, (err) => {
-        inflight = null
-        return { error: String((err && err.message) || err) }
-      })
-      return inflight
+    /**
+     * 后台刷新慢数据（磁盘 / GPU）：到了 TTL 才起一次 PowerShell，已有 inflight 就复用。
+     * 绝不 await——接口要立刻返回快数据，慢数据用上一次的结果。
+     */
+    function refreshSlow() {
+      if (slowInflight !== null) return
+      if (Date.now() - slowAt < SLOW_TTL_MS) return
+      slowInflight = runSample().then((result) => {
+        if (result && !result.error) {
+          slow = { disks: result.disks || [], gpus: result.gpus || [] }
+          slowAt = Date.now()
+        }
+        slowInflight = null
+      }, () => { slowInflight = null })
+    }
+
+    /** 快数据：CPU 用两次 os.cpus() 快照相减，内存直接取 total/free。 */
+    function fastSample() {
+      const curr = cpuSnapshot()
+      const cpu = cpuDeltaPct(cpuPrev, curr)
+      cpuPrev = curr
+      const memTotal = os.totalmem() / 1e9
+      const memFree = os.freemem() / 1e9
+      return {
+        cpu,
+        memTotal: Math.round(memTotal * 10) / 10,
+        memUsed: Math.round((memTotal - memFree) * 10) / 10,
+        at: new Date().toTimeString().slice(0, 8)
+      }
     }
 
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
       path: '/sysmon-api/sample',
-      handler: async (req, res) => {
-        const data = await sample()
-        const body = JSON.stringify({ ...data, sidebarWidth, sidebarWide })
+      handler: (req, res) => {
+        // 先踢一脚后台慢采样，然后立刻返回：CPU/内存是当场算的，磁盘/GPU 用最近一次的值
+        refreshSlow()
+        const data = fastSample()
+        const body = JSON.stringify({
+          ...data,
+          disks: slow.disks,
+          gpus: slow.gpus,
+          sidebarWidth,
+          sidebarWide
+        })
         res.setHeader('Content-Type', 'application/json; charset=utf-8')
         res.setHeader('Cache-Control', 'no-store')
         res.end(body)
