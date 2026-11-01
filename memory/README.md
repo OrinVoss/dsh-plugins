@@ -53,13 +53,14 @@ metadata:
 **How to apply:** 具体怎么做。可用 [[machine-env-and-network]] 互链。
 ```
 
-## 3. 模型拿到的四个工具
+## 3. 模型拿到的五个工具
 
 | 工具 | 作用 |
 |---|---|
 | `memory_write` | 写一条记忆：`scope`（global/project）、`name`（slug，可含 `/`）、`description`（索引那行摘要）、`body`、可选 `title`/`type`/`section`/`overwrite`/`allowSimilar`。**写之前先查重、有就更新**（见 3.1）：条目已存在时**默认拒绝**，必须显式 `overwrite: true` 才整条替换；新建时撞上**相近条目**也会被拦下（要强行新建带 `allowSimilar: true`）。**覆盖时不传 `section` 会沿用索引里现有的分组**（只有全新条目才回退到 name 首段目录）；传了则把条目搬到该分组。 |
 | `memory_search` | 关键词检索，**直接返回命中条目正文**；`query` 省略则返回索引。默认 `scope: auto` = 先当前工作区、再全局。 |
 | `memory_read` | 按名字精确读全文（名字就是索引里的路径，`.md` 可省）。 |
+| `memory_edit` | **定点编辑一条已有记忆**：正文查找替换（`replace: { old, new }`，默认要求 **唯一匹配**）、末尾追加（`append`）、改元数据（`description`/`brief`/`type` 落 frontmatter，`title`/`section` 落索引）；`preview: true` 只看不写。见 3.2。 |
 | `memory_forget` | 删除条目并同步摘掉索引。 |
 
 写入成功后插件会立刻重写 `AGENTS.md` 的托管区块，所以**下一个会话**（以及刷新后的当前会话）就能看到新索引。
@@ -91,6 +92,45 @@ metadata:
 自检里的 `buildProjectBlock` 用例就是被这条误拦过（8 条不同条目共用一句描述）。
 
 更新已有条目（`overwrite: true`）不受查重闸影响；`memory_read` + 改正文仍是最推荐的「更新」姿势。
+
+### 3.2 `memory_edit`：定点编辑，不必整篇重写（2026-11-01，v0.4.0）
+
+改一句话也要把整篇 `body` 重发一遍，是 **丢内容的温床**（模型抄漏一段、顺手改了别的）。`memory_edit` 把常用的三种
+编辑做成独立参数，三种可组合，按 **元数据 → 替换 → 追加** 的固定顺序执行：
+
+```jsonc
+// 1) 改正文里的一句话（old 必须唯一匹配；出现多次会被拒绝并告诉你次数）
+{ "name": "machine/env", "replace": { "old": "代理 10808", "new": "代理 7890" } }
+
+// 2) 片段出现多次、确认要全改
+{ "name": "web/css-notes", "replace": { "old": "z-index:1", "new": "z-index:40", "all": true } }
+
+// 3) 只是"又学到一点" → 末尾追加，不动原有内容
+{ "name": "tools/dsh-desktop-app", "append": "2026-11-01：顺手记一条……" }
+
+// 4) 改元数据（不碰正文）
+{ "name": "tools/kimi-resources", "description": "更准的一句话摘要" }
+
+// 5) 先看再改（不落盘、不提交）
+{ "name": "machine/env", "replace": { "old": "8080", "new": "9090" }, "preview": true }
+```
+
+安全设计：
+
+- **唯一匹配**：`old` 在正文里出现 0 次 → `no-match`；出现多次且没带 `all: true` → `ambiguous`（附出现次数）。
+  这样"本来想改一处、结果全改了"不会静默发生。`old` 是空串 → `bad-replace`。
+- **不换 name、不新建**：找不到条目 → `not-found` 并提示用 `memory_write` 新建；改不动 → `no-change` 并提示可用的参数。
+- **元数据只动该动的**：`description` 改了就同步索引那一行；`title`/`section` 只落索引；`brief` 只影响注入块；
+  `createdAt` 永远保留，`updatedAt` 每次自动刷新。索引去重逻辑复用 `upsertIndexEntry`（不会因挪分组留下两条登记）。
+- **`preview: true`** 返回改动前后与逐行 diff，不落盘；回执里也给 diff（正文差异按前后缀裁剪，最多各 7 行）。
+- 落盘后同样会重写 `AGENTS.md` 托管区块，并 `git commit`（只本地）。
+
+**约定**：`memory_edit` 前后都要"看清原文"——工具描述写明「改之前先用 `memory_read` 读出原文，把 `old` 抄准
+（空白、换行、标点都算）」；大改 / 换 name / 新建条目仍走 `memory_write`。
+
+自检覆盖（`selfcheck.cjs`，独立夹具，13 条）：多处匹配被拒 / 未命中 / `old` 为空 / 唯一替换（`createdAt` 保留、
+`updatedAt` 变化）/ `all: true` 全改 / 末尾追加 / 改 `description`（frontmatter + 索引摘要同步）/ 改 `title`+`section`
+（索引换分组且不留重复登记）/ `preview` 不落盘 / 空操作 / 条目不存在 / `host.js` 声明与描述。
 
 ## 4. 设置页（记忆管理界面）
 

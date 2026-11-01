@@ -933,6 +933,125 @@ check('注入块写明「有同一件事的条目就更新它」', () => {
   assert.match(block, /不要为同一事实新建近似条目/)
 })
 
+// ------------------------------------- memory_edit（2026-11-01 新增工具）
+
+// 独立夹具：编辑用例会改条目内容，不能污染前面那些对计数/内容敏感的断言。
+const editHome = path.join(root, 'edit-memory')
+const editCwd = path.join(root, 'ws-edit')
+fs.mkdirSync(editCwd, { recursive: true })
+const editStore = storeLib.createStore({ home: editHome, agentsPath: path.join(root, 'edit-AGENTS.md'), maxBlockBytes: 20000 })
+const EDIT_BODY = '第一段：端口是 8080。\n\n第二段：端口是 8080，再说一遍。\n\n第三段：完。'
+
+check('（夹具）建一条可编辑的条目', () => {
+  const res = editStore.write('global', {
+    name: 'machine/edit-probe',
+    title: '编辑探针',
+    description: '用于测试 memory_edit 的条目',
+    section: '本机与网络',
+    body: EDIT_BODY
+  }, editCwd)
+  assert.equal(res.ok, true)
+})
+
+check('replace：片段出现多次且没带 all → 拒绝并报告次数', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', replace: { old: '端口是 8080', new: '端口是 9090' } }, editCwd)
+  assert.equal(res.ok, false)
+  assert.equal(res.reason, 'ambiguous')
+  assert.equal(res.count, 2)
+  assert.match(res.message, /all: true/)
+  // 被拒时不应落盘
+  assert.equal(editStore.read('global', 'machine/edit-probe', editCwd).body.includes('9090'), false)
+})
+
+check('replace：片段不存在 → no-match', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', replace: { old: '不存在的片段', new: 'x' } }, editCwd)
+  assert.equal(res.ok, false)
+  assert.equal(res.reason, 'no-match')
+})
+
+check('replace：old 为空 → bad-replace', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', replace: { old: '', new: 'x' } }, editCwd)
+  assert.equal(res.reason, 'bad-replace')
+})
+
+check('replace：唯一匹配 → 改成功，createdAt 保留、updatedAt 变', () => {
+  const before = storeLib.parseEntry(fs.readFileSync(path.join(editHome, 'machine', 'edit-probe.md'), 'utf8')).meta
+  const res = editStore.edit('global', { name: 'machine/edit-probe', replace: { old: '第三段：完。', new: '第三段：改过了。' } }, editCwd)
+  assert.equal(res.ok, true)
+  assert.deepEqual(res.changes, ['replace'])
+  const after = storeLib.parseEntry(fs.readFileSync(path.join(editHome, 'machine', 'edit-probe.md'), 'utf8')).meta
+  assert.equal(after.createdAt, before.createdAt)
+  assert.notEqual(after.updatedAt, before.updatedAt)
+  assert.match(storeLib.parseEntry(fs.readFileSync(path.join(editHome, 'machine', 'edit-probe.md'), 'utf8')).body, /第三段：改过了。/)
+})
+
+check('replace + all: true → 全部替换', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', replace: { old: '端口是 8080', new: '端口是 9090', all: true } }, editCwd)
+  assert.equal(res.ok, true)
+  assert.ok(res.changes.includes('replace×2'))
+  const body = storeLib.parseEntry(fs.readFileSync(path.join(editHome, 'machine', 'edit-probe.md'), 'utf8')).body
+  assert.equal(body.includes('8080'), false)
+  assert.equal((body.match(/9090/g) || []).length, 2)
+})
+
+check('append：末尾追加，不动原有内容', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', append: '第四段：追加的。' }, editCwd)
+  assert.equal(res.ok, true)
+  assert.deepEqual(res.changes, ['append'])
+  const body = storeLib.parseEntry(fs.readFileSync(path.join(editHome, 'machine', 'edit-probe.md'), 'utf8')).body
+  assert.ok(body.endsWith('第四段：追加的。'))
+  assert.ok(body.startsWith('第一段：端口是 9090。'))
+})
+
+check('改 description → frontmatter 与索引摘要一起更新', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', description: '改过摘要的编辑探针' }, editCwd)
+  assert.equal(res.ok, true)
+  assert.equal(res.indexChanged, true)
+  const meta = storeLib.parseEntry(fs.readFileSync(path.join(editHome, 'machine', 'edit-probe.md'), 'utf8')).meta
+  assert.equal(meta.description, '改过摘要的编辑探针')
+  const idx = fs.readFileSync(path.join(editHome, 'INDEX.md'), 'utf8')
+  assert.match(idx, /改过摘要的编辑探针/)
+})
+
+check('改 title + section → 索引标题更新且换分组', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe', title: '编辑探针（改名）', section: '工具配置' }, editCwd)
+  assert.equal(res.ok, true)
+  assert.ok(res.changes.includes('title') && res.changes.includes('section'))
+  assert.equal(res.section, '工具配置')
+  const idx = fs.readFileSync(path.join(editHome, 'INDEX.md'), 'utf8')
+  assert.match(idx, /## 工具配置[\s\S]*- \[编辑探针（改名）\]\(machine\/edit-probe\.md\)/)
+  assert.equal(idx.split('edit-probe.md').length - 1, 1, '挪分组后不该出现两条登记')
+})
+
+check('preview: true → 只回报改动，不落盘', () => {
+  const file = path.join(editHome, 'machine', 'edit-probe.md')
+  const before = fs.readFileSync(file, 'utf8')
+  const res = editStore.edit('global', { name: 'machine/edit-probe', append: '不该写进去', preview: true }, editCwd)
+  assert.equal(res.ok, true)
+  assert.equal(res.preview, true)
+  assert.ok(res.after.body.endsWith('不该写进去'))
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
+})
+
+check('什么都没给 → no-change', () => {
+  const res = editStore.edit('global', { name: 'machine/edit-probe' }, editCwd)
+  assert.equal(res.reason, 'no-change')
+})
+
+check('条目不存在 → not-found（并提示用 memory_write 新建）', () => {
+  const res = editStore.edit('global', { name: 'machine/no-such-entry', append: 'x' }, editCwd)
+  assert.equal(res.reason, 'not-found')
+  assert.match(res.message, /memory_write/)
+})
+
+check('host.js 声明了 memory_edit 工具，且描述强调唯一匹配 / 改前先读', () => {
+  const host = fs.readFileSync(path.join(__dirname, 'host.js'), 'utf8')
+  assert.match(host, /name: 'memory_edit'/)
+  assert.match(host, /唯一匹配/)
+  assert.match(host, /改之前先用 memory_read/)
+  assert.match(host, /preview: true/)
+})
+
 // ---------------------------------------------------------------- 结果
 
 fs.rmSync(root, { recursive: true, force: true })

@@ -807,6 +807,178 @@ function createStore(options) {
     }
   }
 
+
+  /**
+   * 定点编辑一条已有记忆（不整篇重写、不换 name）。
+   *
+   * 三类编辑可组合，按固定顺序执行：
+   *   ① 元数据：description / brief / type（写进 frontmatter）、title / section（落在索引里）
+   *   ② 正文查找替换：`replace: { old, new, all? }`，默认要求 **唯一匹配**（多处匹配直接报错，
+   *      避免"本来想改一处、结果全改了"）；确实要全改才带 `all: true`
+   *   ③ 末尾追加：`append`（不足一条记忆时的补充，不必重写整篇）
+   *
+   * `preview: true` 只返回改动前后的内容，不落盘、不提交——模型可以先看一眼再决定。
+   *
+   * @param scope - 'global' | 'project'
+   * @param input - { name, title?, description?, brief?, type?, section?, replace?, append?, preview? }
+   * @param cwd - 项目作用域解析用
+   * @returns { ok, reason?, message?, changes?, before?, after?, commit?, ... }
+   */
+  function edit(scope, input, cwd) {
+    const { sp, slug, file, target } = entryPath(scope, input.name, cwd)
+    const text = readText(file)
+    if (text === null) {
+      return {
+        ok: false,
+        reason: 'not-found',
+        scope: sp.scope,
+        name: slug,
+        target,
+        message: `没有这条记忆：${target}。先用 memory_search 找到正确的 name；确实要新建就用 memory_write。`
+      }
+    }
+    const parsed = parseEntry(text)
+    const meta = { ...parsed.meta }
+    const before = { meta: { ...parsed.meta }, body: parsed.body }
+    let body = parsed.body
+    const changes = []
+
+    // ①(前) frontmatter 字段
+    if (input.description !== undefined) {
+      const v = oneLine(input.description)
+      if (!v) return { ok: false, reason: 'bad-description', message: 'memory_edit: description 不能改成空（它是索引里那一行摘要）' }
+      if (v !== meta.description) { meta.description = v; changes.push('description') }
+    }
+    if (input.brief !== undefined) {
+      const v = oneLine(input.brief)
+      if (v !== (meta.brief || '')) { meta.brief = v; changes.push('brief') }
+    }
+    if (input.type !== undefined) {
+      if (!ENTRY_TYPES.includes(input.type)) {
+        return { ok: false, reason: 'bad-type', message: `memory_edit: type 只能是 ${ENTRY_TYPES.join(' / ')}` }
+      }
+      if (input.type !== meta.type) { meta.type = input.type; changes.push('type') }
+    }
+
+    // ② 正文查找替换（默认唯一匹配）
+    if (input.replace !== undefined && input.replace !== null) {
+      const oldText = typeof input.replace.old === 'string' ? input.replace.old : ''
+      const newText = typeof input.replace.new === 'string' ? input.replace.new : ''
+      if (!oldText) {
+        return { ok: false, reason: 'bad-replace', message: 'memory_edit: replace.old 必须是非空字符串（要改的原文片段）' }
+      }
+      const count = body.split(oldText).length - 1
+      if (count === 0) {
+        return {
+          ok: false,
+          reason: 'no-match',
+          scope: sp.scope,
+          name: slug,
+          target,
+          message: '正文里找不到要替换的片段（replace.old）。先用 memory_read 确认原文——空白、换行、标点也算，必须一模一样。'
+        }
+      }
+      if (count > 1 && input.replace.all !== true) {
+        return {
+          ok: false,
+          reason: 'ambiguous',
+          scope: sp.scope,
+          name: slug,
+          target,
+          count,
+          message: `要替换的片段在正文里出现 ${count} 次，无法确定改哪一处。请带上更长的上下文让它唯一，或确认要全改时带 replace.all: true。`
+        }
+      }
+      body = input.replace.all === true ? body.split(oldText).join(newText) : body.replace(oldText, newText)
+      changes.push(count > 1 ? `replace×${count}` : 'replace')
+    }
+
+    // ③ 末尾追加
+    if (input.append !== undefined && input.append !== null) {
+      const add = String(input.append).trim()
+      if (!add) return { ok: false, reason: 'bad-append', message: 'memory_edit: append 不能是空字符串' }
+      body = body ? `${body.replace(/\s+$/, '')}\n\n${add}` : add
+      changes.push('append')
+    }
+
+    // ①(后) 索引里的 title / section
+    const indexText = readText(sp.indexFile) || defaultIndexHeader(sp.scope)
+    const currentEntry = indexEntries(indexText).find((e) => e.target === target)
+    let titleNow = currentEntry ? currentEntry.title : slug.split('/').pop()
+    if (input.title !== undefined) {
+      const v = String(input.title).trim()
+      if (!v) return { ok: false, reason: 'bad-title', message: 'memory_edit: title 不能改成空' }
+      if (v !== titleNow) { titleNow = v; changes.push('title') }
+    }
+    const wantedSection = input.section !== undefined ? String(input.section).trim() : ''
+    const sectionNow = currentEntry ? currentEntry.section : (slug.includes('/') ? slug.split('/')[0] : DEFAULT_SECTION)
+    if (wantedSection && wantedSection !== sectionNow) changes.push('section')
+
+    if (changes.length === 0) {
+      return {
+        ok: false,
+        reason: 'no-change',
+        scope: sp.scope,
+        name: slug,
+        target,
+        message: 'memory_edit: 没有任何实际改动。要改什么？可给 replace:{old,new} / append / description·brief·type·title·section。'
+      }
+    }
+
+    const updatedAt = new Date().toISOString()
+    meta.updatedAt = updatedAt
+    const after = { meta: { ...meta }, body }
+    const indexChanged = changes.some((c) => c === 'title' || c === 'section' || c === 'description')
+
+    if (input.preview === true) {
+      return {
+        ok: true,
+        preview: true,
+        scope: sp.scope,
+        key: sp.key,
+        name: slug,
+        target,
+        changes,
+        updatedAt,
+        indexChanged,
+        before,
+        after
+      }
+    }
+
+    writeTextAtomic(file, serializeEntry(meta, body))
+    let section = sectionNow
+    if (indexChanged) {
+      const nextIndex = upsertIndexEntry(
+        indexText,
+        wantedSection || sectionNow,
+        { title: titleNow, target, summary: meta.description },
+        { forceSection: !!wantedSection }
+      )
+      writeTextAtomic(sp.indexFile, nextIndex)
+      const landed = indexEntries(nextIndex).find((e) => e.target === target)
+      if (landed) section = landed.section
+    }
+    const commit = commitLibrary(`记忆编辑（${sp.scope}）：${target} — ${changes.join('、')}`)
+    return {
+      ok: true,
+      preview: false,
+      commit,
+      scope: sp.scope,
+      key: sp.key,
+      name: slug,
+      target,
+      file,
+      changes,
+      updatedAt,
+      indexChanged,
+      section,
+      indexFile: sp.indexFile,
+      before,
+      after
+    }
+  }
+
   function forget(scope, name, cwd) {
     const { sp, slug, file, target } = entryPath(scope, name, cwd)
     const existed = readText(file) !== null
@@ -1136,6 +1308,7 @@ function createStore(options) {
     status,
     read,
     write,
+    edit,
     forget,
     search,
     buildBlock,

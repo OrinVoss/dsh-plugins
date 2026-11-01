@@ -12,6 +12,8 @@
 // 记忆的磁盘格式、索引维护、AGENTS.md 托管区块等全部逻辑在 lib/store.js，
 // 那部分可以脱离 DSH 单独跑（见 selfcheck.cjs 与 plugintest.cjs）。
 //
+// v0.4.0（2026-11-01）：新增 memory_edit 工具（正文查找替换「唯一匹配」/ 末尾追加 / 改元数据 + preview），
+// 让模型不必为了改一句话整篇重写 body（也就不会再顺手把别的内容改丢）。
 // v0.3.1（2026-10-01）：lib/store.js 修掉「overwrite 漏传 section → 索引同 target 重复登记」
 // （根因与修复见 README §7.1），新增 reindex.cjs 修已写脏的库；本行同时让 HMR 重挂载入口。
 
@@ -112,6 +114,45 @@ function resolveScope(store, wanted, name, cwd) {
     if (hit.found) return 'project'
   } catch (_) { /* 无 cwd 时项目作用域不可用 */ }
   return 'global'
+}
+
+/** 单行化：编辑回执里的字段值不能带换行（否则会把 diff 排版搞乱）。 */
+function inlineText(value) {
+  return String(value == null ? '' : value).replace(/\r?\n/g, ' ').trim()
+}
+
+/**
+ * 渲染编辑前后的差异（给模型看的 preview 与回执）。
+ * 正文按行做前缀/后缀裁剪，最多各 7 行；元数据变化单独列。
+ */
+function renderEditDiff(before, after) {
+  const out = []
+  for (const key of ['description', 'brief', 'type']) {
+    const a = inlineText(before.meta[key])
+    const b = inlineText(after.meta[key])
+    if (a !== b) {
+      out.push(`- ${key}: ${a || '（空）'}`)
+      out.push(`+ ${key}: ${b || '（空）'}`)
+    }
+  }
+  if (before.body !== after.body) {
+    const a = before.body.split('\n')
+    const b = after.body.split('\n')
+    let start = 0
+    while (start < a.length && start < b.length && a[start] === b[start]) start += 1
+    let endA = a.length - 1
+    let endB = b.length - 1
+    while (endA >= start && endB >= start && a[endA] === b[endB]) { endA -= 1; endB -= 1 }
+    const removed = a.slice(start, endA + 1)
+    const added = b.slice(start, endB + 1)
+    if (removed.length > 0 || added.length > 0) {
+      out.push(`正文第 ${start + 1} 行起：`)
+      for (const line of removed.slice(0, 7)) out.push(`- ${line}`)
+      for (const line of added.slice(0, 7)) out.push(`+ ${line}`)
+      if (removed.length > 7 || added.length > 7) out.push('…（差异过长已截断；完整内容用 memory_read 看）')
+    }
+  }
+  return out.join('\n')
 }
 
 /** 把 store 抛出的错误转成模型可读的文本，而不是让整个工具调用失败。 */
@@ -307,6 +348,82 @@ function applyInner(ctx, config) {
       return { text: chunks.join('\n\n') }
     }
   })), 'dsh-memory: memory_search')
+
+  ctx.effect(() => defineRegister(ctx, defineTool({
+    name: 'memory_edit',
+    description:
+      '**定点编辑一条已有记忆**（不整篇重写、不换 name）：① 改正文里的一句话——`replace: { old, new }`，' +
+      '默认要求 old 在正文里**唯一匹配**（出现多次会被拒绝，除非带 `all: true`）；② 在末尾追加一段——`append`；' +
+      '③ 改元数据——`description` / `brief` / `type`（落 frontmatter）、`title` / `section`（落索引）。' +
+      '**改之前先用 memory_read 读出原文**，把 old 片段抄准（空白、换行、标点都算）。' +
+      '`preview: true` 只看改动不落盘。要大改 / 换 name / 新建条目，仍用 memory_write。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name'],
+      properties: {
+        name: { type: 'string', description: '要编辑的条目 name（索引里的路径，去掉 .md；也接受叶子名）' },
+        scope: { ...SCOPE_PARAM },
+        replace: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['old', 'new'],
+          description: '正文查找替换：old 必须是**唯一匹配**的片段（否则报错并告诉你出现了几次）',
+          properties: {
+            old: { type: 'string', description: '要替换的原文片段（照抄，含空白与标点）' },
+            new: { type: 'string', description: '替换成什么；空字符串 = 删掉这段' },
+            all: { type: 'boolean', description: '片段出现多次时是否全部替换（默认 false：多处匹配直接报错）' }
+          }
+        },
+        append: { type: 'string', description: '在正文末尾追加一段（自动空一行；适合"又学到一点"的补充，不必重写整篇）' },
+        description: { type: 'string', description: '改 frontmatter 的一句话摘要（同时更新索引那一行）' },
+        brief: { type: 'string', description: '改注入块用的压缩摘要（≤12 个汉字；省略则不动）' },
+        type: { type: 'string', enum: ENTRY_TYPES, description: '改条目类型' },
+        title: { type: 'string', description: '改索引里显示的标题（不写 frontmatter）' },
+        section: { type: 'string', description: '把条目挪到另一个索引分组（不传则不动）' },
+        preview: { type: 'boolean', description: '只返回改动前后的内容，不落盘、不提交（默认 false）' }
+      }
+    },
+    execute(args, exec) {
+      const cwd = cwdOf(exec)
+      const wanted = args.scope || 'auto'
+      return attempt('memory_edit', () => {
+        const scope = resolveScope(store, wanted, args.name, cwd)
+        const res = store.edit(scope, {
+          name: args.name,
+          replace: args.replace,
+          append: args.append,
+          description: args.description,
+          brief: args.brief,
+          type: args.type,
+          title: args.title,
+          section: args.section,
+          preview: args.preview === true
+        }, cwd)
+        if (!res.ok) return { text: `memory_edit 未生效：${res.message}` }
+        const where = res.scope === 'global' ? '全局记忆' : `工作区记忆（${res.key}）`
+        const head = res.preview
+          ? `预览（未落盘）${where}：\`${res.target}\` —— 将改动：${res.changes.join('、')}`
+          : `已编辑${where}：\`${res.target}\`（${res.changes.join('、')}）`
+        const diff = renderEditDiff(res.before, res.after)
+        if (res.preview) return { text: [head, '', diff].filter(Boolean).join('\n') }
+        sync(cwd)
+        return {
+          text: [
+            head,
+            '',
+            diff,
+            '',
+            res.indexChanged ? `索引已同步（分组「${res.section}」）。` : '',
+            autoSync ? `全局指令 \`${store.agentsPath}\` 的记忆索引区块已同步，下个会话自动可见。` : '',
+            res.commit && res.commit.committed ? '记忆库已本地提交（未推送）。'
+              : res.commit && res.commit.reason === 'not-a-repo' ? '（记忆库不是 git 仓库，未提交）'
+                : res.commit && res.commit.reason === 'disabled' ? '' : ''
+          ].filter(Boolean).join('\n')
+        }
+      })
+    }
+  })), 'dsh-memory: memory_edit')
 
   ctx.effect(() => defineRegister(ctx, defineTool({
     name: 'memory_read',

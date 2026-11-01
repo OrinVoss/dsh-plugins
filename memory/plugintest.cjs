@@ -199,8 +199,8 @@ check('onStartup 同步：AGENTS.md 被创建且带托管区块', () => {
   assert.match(text, /长期记忆库/)
 })
 
-check('注册了 4 个工具且形状合法', () => {
-  assert.deepEqual(registered.map((d) => d.name).sort(), ['memory_forget', 'memory_read', 'memory_search', 'memory_write'])
+check('注册了 5 个工具且形状合法', () => {
+  assert.deepEqual(registered.map((d) => d.name).sort(), ['memory_edit', 'memory_forget', 'memory_read', 'memory_search', 'memory_write'])
   for (const def of registered) {
     assert.equal(typeof def.description, 'string')
     assert.ok(def.description.length > 20, `${def.name} 缺 description`)
