@@ -21,7 +21,7 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 
 | 插件 | 包名 / 版本 | 形态 | 一句话 |
 | --- | --- | --- | --- |
-| [**记忆**](memory/) | `dsh-memory` 0.3.2 | 组合包 | 跨会话的 Markdown 长期记忆 + 四个 `memory_*` 工具；全局索引注入 `AGENTS.md` 托管区块、**工作区索引注入工作区自己的 `AGENTS.local.md`**，设置页可浏览编辑 |
+| [**记忆**](memory/) | `dsh-memory` 0.4.0 | 组合包 | 跨会话的 Markdown 长期记忆 + 五个 `memory_*` 工具；全局索引注入 `AGENTS.md` 托管区块、**工作区索引注入工作区自己的 `AGENTS.local.md`**，设置页可浏览编辑 |
 | [**桌面宠物**](pet/) | `dsh-pet` 0.1.0 | 普通包 | 浮层里的一只小家伙：5 种宠物、7 种状态，随皮肤换色、随 Agent 干活换表情 |
 | [**皮肤**](skins/) | `dsh-skins` 1.0.0 | 普通包 | 叠加在浅/深主题上的 7 套配色层（青花瓷 / 东京夜 / 水墨 / 青绿山水 / 卡布奇诺 / 中国风 / 莫兰迪），字体一起换 |
 | [**系统状态**](sysmon/) | `dsh-sysmon` 1.0.0 | 普通包 | 侧栏底部一排圆环：CPU / 内存 / 磁盘 IO / 双显卡（窄侧栏收敛成单个 CPU 环） |
@@ -138,6 +138,11 @@ cd <包目录>; npm test          # 有 test 脚本的包
 有同一件事的条目就用同一个 `name` + `overwrite: true` 更新它，别为同一事实新建近似条目」；注入块里也写了
 同一条约定；并且**新建时撞上相近条目会被硬拦下**（同标题或 slug 词块 Jaccard ≥ 0.6，返回 `reason: "similar"`
 并列出候选），确认是新事实才带 `allowSimilar: true`。
+
+**定点编辑 `memory_edit`（2026-11-01）**：新增第五个工具，改一句话不必整篇重写 `body`——① 正文查找替换
+`replace: { old, new }`（**默认要求唯一匹配**，出现多次直接拒绝并告诉你次数，`all: true` 才全改）；② 末尾追加
+`append`；③ 改元数据（`description`/`brief`/`type` 落 frontmatter，`title`/`section` 落索引）；`preview: true`
+只看不写。`createdAt` 永远保留、`updatedAt` 自动刷新，索引去重复用 `upsertIndexEntry`。
 
 **注入分两个层级**，都走 DSH 自己的指令文件机制（`dsh-agent-instructions` 会加载它们）：
 
