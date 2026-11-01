@@ -24,6 +24,9 @@ window.__ModuleLoader__.load({
       document.head.appendChild(tag)
     }
 
+    /** 轮询间隔：CPU/内存是宿主当场算的（零成本），500ms 足够跟手；磁盘/GPU 由宿主后台 2s 慢刷。 */
+    const SAMPLE_MS = 500
+
     function useSample(ms) {
       const [data, setData] = react.useState(null)
       const [failed, setFailed] = react.useState(false)
@@ -81,7 +84,7 @@ window.__ModuleLoader__.load({
           strokeDasharray: c,
           strokeDashoffset: c * (1 - v / 100),
           transform: 'rotate(-90 ' + size / 2 + ' ' + size / 2 + ')',
-          style: { transition: 'stroke-dashoffset .5s ease' }
+          style: { transition: 'stroke-dashoffset .3s ease' }
         })
       ]
       if (text) {
@@ -113,7 +116,7 @@ window.__ModuleLoader__.load({
     // ---- Sidebar foot ring gauges (sidebar.footer.action) ----
     function SysmonFoot(props) {
       const wide = !(props && props.wide === false)
-      const [data, failed] = useSample(1000)
+      const [data, failed] = useSample(SAMPLE_MS)
       const ok = data && !data.error
       const cpu = ok && data.cpu != null ? data.cpu : 0
 
