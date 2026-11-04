@@ -9,7 +9,7 @@ const fs = require('fs')
 const path = require('path')
 const zlib = require('zlib')
 
-const { inflateFrames, pickLogFile, localDayKey, LOG_NAME_RE } = require('./lib/scan')
+const { inflateFrames, pickLogFile, localDayKey, LOG_NAME_RE, frameEnd, splitFrames, parseLogBuffer, inflateFramesBuffer, scanSessions } = require('./lib/scan')
 const { _internal } = require('./host')
 
 let passed = 0
@@ -496,7 +496,123 @@ async function live() {
   assert.strictEqual(modelSum, data.totals.total, '按模型之和与总量不一致')
 }
 
+
+console.log('\n[6] 性能重写回归（精确切帧 / 行级抽取 / 增量缓存）')
+
+test('精确帧边界：frameEnd 恰好等于单帧长度', () => {
+  const one = frame({ type: 'session', id: 'x' })
+  assert.strictEqual(frameEnd(one, 0), one.length)
+})
+
+test('精确帧边界：3 帧拼接切出 3 段且首尾相接', () => {
+  const parts = [frame({ a: 1 }), frame({ b: 2 }), frame({ c: 3 })]
+  const all = Buffer.concat(parts)
+  const ranges = splitFrames(all)
+  assert.strictEqual(ranges.length, 3)
+  assert.strictEqual(ranges[0][0], 0)
+  assert.strictEqual(ranges[0][1], parts[0].length)
+  assert.strictEqual(ranges[1][0], parts[0].length)
+  assert.strictEqual(ranges[2][1], all.length)
+})
+
+test('精确帧边界：垃圾头 / 残缺尾被跳过，只留合法帧', () => {
+  const good = frame({ ok: true })
+  const buf = Buffer.concat([
+    Buffer.from('garbage' + 'x'.repeat(33)),
+    good,
+    Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x01])
+  ])
+  const ranges = splitFrames(buf)
+  assert.strictEqual(ranges.length, 1)
+  assert.strictEqual(inflateFrames(buf), JSON.stringify({ ok: true }) + '\n')
+})
+
+test('行级抽取：header + 只有 assistant/message 的 usage 被计入', () => {
+  const buf = Buffer.concat([
+    frame({ type: 'session', id: 's-1', cwd: 'D:\\w', agentPreset: 'p1', createdAt: 1000, version: 4 }),
+    frame(step(1, 2000, 'm-a', 'prov-a', 10, 2, 3)),
+    frame({ type: 'assistant/delta', seq: 2, time: 2500, data: { text: '不含 usage' } }),
+    frame(step(3, 3000, 'm-b', 'prov-b', 1, 1, 1))
+  ])
+  const parsed = parseLogBuffer(inflateFramesBuffer(buf))
+  assert.strictEqual(parsed.header.id, 's-1')
+  assert.strictEqual(parsed.steps.length, 2)
+  assert.deepStrictEqual(parsed.steps[0], [2000, 'm-a', 'prov-a', 10, 2, 3])
+  assert.deepStrictEqual(parsed.steps[1], [3000, 'm-b', 'prov-b', 1, 1, 1])
+})
+
+function makeLog(list) {
+  return Buffer.concat(list.map((o) => frame(o)))
+}
+
+async function perfTests() {
+  const os = require('os')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-tokenstats-scan-'))
+  const home = path.join(tmp, 'dsh')
+  const mkSession = (name, list) => {
+    const dir = path.join(home, 'sessions', 'ws-a', name)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'session.v4.jsonl.zstd'), makeLog(list))
+    return dir
+  }
+  mkSession('session-aaa', [
+    { type: 'session', id: 'sess-a', cwd: 'D:\\a', createdAt: 1000 },
+    step(1, 5000, 'm', 'p', 100, 10, 5),
+    step(2, 6000, 'm', 'p', 200, 20, 6)
+  ])
+  mkSession('session-bbb', [
+    { type: 'session', id: 'sess-b', cwd: 'D:\\b', createdAt: 2000 },
+    step(1, 7000, 'm2', 'p2', 1, 2, 3)
+  ])
+  const cacheFile = path.join(home, 'token-stats', 'scan-cache.json')
+
+  await testAsync('冷扫：2 个会话全部解析，步数与 token 正确', async () => {
+    const r = await scanSessions(home, { cacheFile })
+    assert.strictEqual(r.files, 2)
+    assert.strictEqual(r.parsed, 2)
+    assert.strictEqual(r.reused, 0)
+    assert.strictEqual(r.sessions.length, 2)
+    assert.strictEqual(r.steps.length, 3)
+    assert.strictEqual(r.steps.reduce((n, x) => n + x.input, 0), 301)
+    assert.ok(fs.existsSync(cacheFile), '应写出 scan-cache.json')
+  })
+
+  await testAsync('热扫：全部命中缓存且结果一致', async () => {
+    const r = await scanSessions(home, { cacheFile })
+    assert.strictEqual(r.parsed, 0)
+    assert.strictEqual(r.reused, 2)
+    assert.strictEqual(r.steps.length, 3)
+    assert.strictEqual(r.sessions.length, 2)
+  })
+
+  await testAsync('增量：只有一个文件变化时只重解析它', async () => {
+    const dir = path.join(home, 'sessions', 'ws-a', 'session-aaa')
+    fs.appendFileSync(path.join(dir, 'session.v4.jsonl.zstd'), frame(step(3, 8000, 'm', 'p', 7, 0, 0)))
+    const r = await scanSessions(home, { cacheFile })
+    assert.strictEqual(r.parsed, 1)
+    assert.strictEqual(r.reused, 1)
+    assert.strictEqual(r.steps.length, 4)
+    assert.strictEqual(r.sessions.find((x) => x.id === 'sess-a').steps, 3)
+  })
+
+  await testAsync('cacheFile: null 时不写缓存文件', async () => {
+    const home2 = path.join(tmp, 'dsh2')
+    const dir = path.join(home2, 'sessions', 'ws', 'session-c')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'session.v4.jsonl.zstd'), makeLog([
+      { type: 'session', id: 'c', createdAt: 1 },
+      step(1, 100, 'm', 'p', 5, 5, 5)
+    ]))
+    const r = await scanSessions(home2, { cacheFile: null })
+    assert.strictEqual(r.steps.length, 1)
+    assert.strictEqual(fs.existsSync(path.join(home2, 'token-stats', 'scan-cache.json')), false)
+  })
+
+  fs.rmSync(tmp, { recursive: true, force: true })
+}
+
 async function main() {
+  await perfTests()
   if (process.argv.includes('--live')) {
     await testAsync('扫描真实会话库并自洽', live)
   }

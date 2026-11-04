@@ -241,7 +241,8 @@ function createScanner(cfg, logger) {
     state.scanning = true
     const started = Date.now()
     try {
-      const scan = await scanSessions(home)
+      // 带单文件增量缓存：没变过的会话（size+mtime 一致）直接复用上次解析结果，不读盘不解压
+      const scan = await scanSessions(home, { cacheFile: path.join(home, 'token-stats', 'scan-cache.json') })
       const data = aggregate(scan, cfg.modelAliases)
       state.data = data
       state.scannedAt = Date.now()
@@ -249,8 +250,9 @@ function createScanner(cfg, logger) {
       state.lastError = null
       writeCache(data)
       logger.info(
-        'dsh-token-stats: 扫描完成 %d 个会话 / %d 步 / %d 个模型，用时 %dms',
-        scan.sessions.length, scan.steps.length, data.models.length, state.lastMs
+        'dsh-token-stats: 扫描完成 %d 个会话 / %d 步 / %d 个模型，用时 %dms（复用缓存 %d 个 / 真解析 %d 个）',
+        scan.sessions.length, scan.steps.length, data.models.length, state.lastMs,
+        scan.reused || 0, scan.parsed || 0
       )
       return data
     } catch (err) {

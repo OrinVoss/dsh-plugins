@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-stats",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Token 用量统计报表：解析本机 DSH 会话日志里的 usage，按天 / 按模型汇总，提供热力图、每日趋势图与模型用量环形图。",
   "icon": "./icon.svg",
@@ -24,6 +24,7 @@
     "host.js",
     "client.js",
     "lib/scan.js",
+    "selftest.cjs",
     "icon.svg",
     "locale/*.json",
     "README.md"
