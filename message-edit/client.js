@@ -208,7 +208,7 @@ window.__ModuleLoader__.load({
  * （2026-10-28 真机截图）。取 40：高于所有官方**流内**浮层（吸顶条 ≤7 等），
  * 又低于官方菜单/面板的 1100，所以官方弹层仍然压在它上面。
  */
-.me-confirm{position:absolute;right:0;top:calc(100% + 6px);z-index:40;
+.me-confirm{position:fixed;z-index:40;
   box-sizing:border-box;display:flex;flex-direction:column;gap:10px;
   width:max-content;max-width:min(300px,80vw);padding:12px;
   border-radius:var(--dsw-radius-lg,12px);
@@ -217,8 +217,10 @@ window.__ModuleLoader__.load({
   box-shadow:var(--dsw-elevation-panel,var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.18)));
   animation:me-confirm-in var(--ds-transition-duration,140ms) var(--ds-ease-in-out,ease-out);
   max-height:min(40vh,320px);overflow:auto}
-/* 最后一条消息下面就是输入框：放不下时翻到消息上方（由 JS 实测可用空间决定）。 */
-.me-confirm[data-placement="above"]{top:auto;bottom:calc(100% + 6px)}
+/* 定位由 JS 实测后内联。**必须 fixed**：气泡原本是消息行内的绝对定位元素，而行在对话滚动
+   容器（overflow:auto）里，绝对定位会被容器从底部裁掉——真机上最后一行「…视图里隐藏。」
+   被切掉半个字（2026-11-06 截图）。fixed 相对视口定位，不受任何祖先 overflow 裁剪。 */
+.me-confirm[data-ready="0"]{visibility:hidden;pointer-events:none}
 .me-confirm-title{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:510;line-height:20px}
 .me-confirm-text{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:pre-wrap}
 .me-confirm-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
@@ -508,7 +510,8 @@ window.__ModuleLoader__.load({
         const [closing, setClosing] = React.useState(false)
         const [editBox, setEditBox] = React.useState(null)
         const [confirming, setConfirming] = React.useState(false)
-        const [placement, setPlacement] = React.useState('below')
+        // 确认气泡的实测定位：{ right, top | bottom, maxHeight }；null = 还没量到（先隐藏，避免闪）
+        const [confirmBox, setConfirmBox] = React.useState(null)
         const confirmRef = React.useRef(null)
         const originalText = React.useMemo(() => textOf(data), [data])
         // 这个节点是不是本插件写下的遮蔽占位（撤回/编辑）？
@@ -678,7 +681,7 @@ window.__ModuleLoader__.load({
          * "页面里最靠下的输入控件就是消息输入框"，拿它的 top 当边界。
          */
         React.useLayoutEffect(() => {
-          if (!confirming) return
+          if (!confirming) { setConfirmBox(null); return undefined }
           const root = rootRef.current
           const panel = confirmRef.current
           if (root === null || panel === null) return
@@ -702,11 +705,37 @@ window.__ModuleLoader__.load({
             limitBottom = rect.top - 10
           }
 
-          const box = root.getBoundingClientRect()
-          const panelBox = panel.getBoundingClientRect()
-          const below = limitBottom - box.bottom - 6
-          const above = box.top - (viewport === null ? 0 : viewport.top) - 6
-          setPlacement(panelBox.height <= below || below >= above ? 'below' : 'above')
+          const limitTop = Math.max(0, viewport === null ? 0 : viewport.top)
+
+          // 量一次、定一次位；滚动/改窗口大小时重算（气泡是临时的，不跟随内容变化）
+          const place = () => {
+            const anchor = root.getBoundingClientRect()
+            const height = panel.offsetHeight
+            const spaceBelow = limitBottom - anchor.bottom - 6
+            const spaceAbove = anchor.top - limitTop - 6
+            const fitsBelow = height <= spaceBelow
+            const fitsAbove = height <= spaceAbove
+            // 下方放得下就放下方（贴着操作行）；否则翻到上方；两边都不够就取空间大的一侧
+            const useAbove = !fitsBelow && (fitsAbove || spaceAbove > spaceBelow)
+            const room = Math.max(0, useAbove ? spaceAbove : spaceBelow)
+            setConfirmBox({
+              right: Math.max(8, Math.round(window.innerWidth - anchor.right)),
+              ...(useAbove
+                ? { bottom: Math.max(8, Math.round(window.innerHeight - anchor.top + 6)) }
+                : { top: Math.round(anchor.bottom + 6) }),
+              // 空间不够时**在气泡内部滚动**，而不是让外层容器把内容切掉
+              maxHeight: Math.round(Math.min(320, Math.max(120, room)))
+            })
+          }
+          place()
+
+          const onReflow = () => place()
+          window.addEventListener('resize', onReflow)
+          if (scroller !== null) scroller.addEventListener('scroll', onReflow, { passive: true })
+          return () => {
+            window.removeEventListener('resize', onReflow)
+            if (scroller !== null) scroller.removeEventListener('scroll', onReflow)
+          }
         }, [confirming])
 
         // 确认气泡的关闭语义：点外面 / Esc 关；开着时 Enter 直接确认（与官方弹层一致）。
@@ -851,7 +880,16 @@ window.__ModuleLoader__.load({
                 ref: confirmRef,
                 role: 'dialog',
                 'aria-label': COPY.confirmTitle,
-                'data-placement': placement,
+                'data-ready': confirmBox === null ? '0' : '1',
+                ...(confirmBox === null ? {} : {
+                  style: {
+                    right: `${confirmBox.right}px`,
+                    ...(confirmBox.bottom !== undefined
+                      ? { bottom: `${confirmBox.bottom}px` }
+                      : { top: `${confirmBox.top}px` }),
+                    maxHeight: `${confirmBox.maxHeight}px`
+                  }
+                }),
               },
                 React.createElement('div', { className: 'me-confirm-title' }, COPY.confirmTitle),
                 React.createElement('p', { className: 'me-confirm-text' }, COPY.confirmBody(turnOf(node) ?? 0)),
