@@ -28,7 +28,7 @@ Agent Teams 补上「让 teammates 散伙」的 fork。
 | [**Token 统计**](token-stats/) | `dsh-token-stats` 0.2.0 | 普通包 | 解析会话日志 `usage`：活跃度热力图 + 每日趋势 + 模型用量环形图 |
 | [**拓展包**](style-extras/) | `dsh-style-extras` 1.0.0 | 组合包 | 把**六个**成员（皮肤 / 系统状态 / Token 统计 / 桌面宠物 / 临时提问 / 消息撤回编辑）收进一张卡片统一启停 |
 | [**临时提问**](btw/) | `dsh-btw` 0.1.0 | 普通包 | 右侧栏「开始」页的 `/btw` 卡片：答案不进历史、没有工具、退出即消失 |
-| [**消息撤回 / 编辑**](message-edit/) | `dsh-message-edit` 0.1.0 | 普通包 | 已发送的用户消息可以**撤回**和**编辑**：原生操作行加两个图标钮，编辑态在原气泡位置无缝覆盖 |
+| [**消息撤回 / 编辑**](message-edit/) | `dsh-message-edit` 0.1.1 | 普通包 | 已发送的用户消息可以**撤回**和**编辑**：原生操作行加两个图标钮，编辑态在原气泡位置无缝覆盖 |
 | [**Agent Teams Plus**](agent-team-plus/) | `@local/dsh-agent-team-plus` 0.2.0-rc.2.1 | 组合包 | 官方 Agent Teams 的 fork：成员上限 8 → 16，新增 `release_teammate`（成员散伙腾坑、可再雇新） |
 | [**跨实例任务投递桥**](dsh-xiaoxing-bridge/) | `dsh-xiaoxing-bridge` 0.1.0 | 组合包 | 每 3 秒扫共享 `inbox/`，把**已批准**的任务投进指定会话，再把进度与最终答复写回 `outbox/`。⚠️ **双向桥的一半**：对侧在 study-kit，两边 `bridgeDir` 必须一致，**单装无效** |
 
