@@ -239,12 +239,17 @@ return <div className="me-root">
   `prefers-reduced-motion` 下关闭。
 - **按钮**：抄官方 Button 原子的 `.sm` 尺寸（28px 高 / 12px 字号 / `--dsw-radius-sm` / `padding:0 10px`），
   主按钮 `--dsw-alias-button-primary-fill`+`-hover`，次按钮 ghost 用 `--dsw-alias-interactive-bg-hover`+`-active`。
-- **位置**：`position:absolute; right:0; top:calc(100% + 6px)`——就在这条消息下面、右对齐；
-  开着时给 `.me-root` 加 `data-confirming="1"`（`z-index:30`）压过后续行。
+- **位置**：**`position:fixed`** + JS 实测后内联 `right` / `top|bottom` / `max-height`（见下面"方向"）。
+  为什么要 fixed：气泡挂在消息行里是正确的（能收到点击），但行在对话滚动容器（`overflow:auto`）里，
+  **绝对定位会被容器从底部裁掉**——2026-11-06 真机截图：确认文案最后一行
+  「…从当前对话视图里隐藏。」被切掉半个字。`fixed` 相对视口定位，不受任何祖先 `overflow` 裁剪。
+  开着时仍给 `.me-root` 加 `data-confirming="1"`，但**不抬整行的 z-index**（见坑 2）。
 - **行为**：`Enter` 确认、`Esc` 取消、点气泡外面取消、初始焦点在主按钮上（均在捕获阶段拦按键，
   避免官方组件在同一按键上另有动作）；确认后才走 `/apply`，`busy` 期间撤回键禁用。
-- **方向**：默认在消息下面；打开时实测可用空间，**下面被输入框占住就翻到消息上方**
-  （`.me-confirm[data-placement="above"]{top:auto;bottom:calc(100% + 6px)}`）。
+- **方向与高度**：打开时实测可用空间（`spaceBelow` 到输入框顶边、`spaceAbove` 到滚动区顶边）：
+  下面放得下就贴在消息下方；放不下翻到上方；两边都不够就取大的一侧并把 `max-height` 夹到该空间，
+  **在气泡内部滚动**（而不是让外层容器把内容切掉）。窗口 resize / 对话区滚动时重算。
+  量到位置之前用 `data-ready="0"` 隐藏，避免闪一下。
   ⚠️ 坑 1（真机踩到）：对话流的滚动容器**一直延伸到窗口底边**，输入框是浮在它上面的——
   边界必须取**输入框顶边**（"页面里最靠下的输入控件"就是它），否则"下方空间"永远算成够用，
   最后一条消息的气泡会被输入框盖掉半截。
